@@ -403,9 +403,7 @@ export default function App() {
                 }
               >
                 <option value="press_and_hold">Press and Hold</option>
-                <option value="toggle" disabled>
-                  Toggle (coming soon)
-                </option>
+                <option value="toggle">Toggle</option>
               </select>
             </div>
 
