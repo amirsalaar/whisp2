@@ -89,6 +89,7 @@ pub fn spawn_tasks(
     rt.spawn(async move {
         let mut stop_tx: Option<mpsc::Sender<()>> = None;
         let mut pcm_rx: Option<mpsc::Receiver<Vec<f32>>> = None;
+        let mut saved_vol: Option<f32> = None;
 
         loop {
             let cmd = cmd_rx.recv().await;
@@ -98,6 +99,7 @@ pub fn spawn_tasks(
                         Ok((tx, rx)) => {
                             stop_tx = Some(tx);
                             pcm_rx = Some(rx);
+                            saved_vol = audio::volume::boost();
                             tracing::info!("recording started");
                         }
                         Err(e) => {
@@ -109,6 +111,9 @@ pub fn spawn_tasks(
                 Some(RecordingCommand::Stop) => {
                     if let Some(tx) = stop_tx.take() {
                         drop(tx); // signal stop
+                    }
+                    if let Some(vol) = saved_vol.take() {
+                        audio::volume::restore(vol);
                     }
                     if let Some(mut rx) = pcm_rx.take() {
                         let config = state_arc.config.read().unwrap().clone();
@@ -125,6 +130,7 @@ pub fn spawn_tasks(
                                             match manager::transcribe(&config, wav).await {
                                                 Ok(text) => {
                                                     tracing::info!("transcribed: {}", text);
+                                                    let text = crate::correction::dictionary::apply(text);
                                                     // Save to history
                                                     if config.save_history {
                                                         let provider_name = format!("{:?}", config.provider);
