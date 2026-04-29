@@ -126,7 +126,24 @@ async fn main() {
             }
 
             // Spawn all async background tasks
-            spawn_tasks(app_handle, state_arc, hotkey_rx);
+            spawn_tasks(app_handle, state_arc.clone(), hotkey_rx);
+
+            // Show settings on first launch if no API key is configured
+            {
+                use whisp_rs_lib::config::models::TranscriptionProvider;
+                let provider = state_arc.config.read().unwrap().provider.clone();
+                let key_name = match provider {
+                    TranscriptionProvider::OpenAI => "openai_api_key",
+                    TranscriptionProvider::Groq => "groq_api_key",
+                    TranscriptionProvider::Gemini => "gemini_api_key",
+                };
+                if matches!(whisp_rs_lib::keychain::get(key_name), Ok(None)) {
+                    if let Some(window) = app.get_webview_window("settings") {
+                        let _ = window.show();
+                        let _ = window.set_focus();
+                    }
+                }
+            }
 
             Ok(())
         })
