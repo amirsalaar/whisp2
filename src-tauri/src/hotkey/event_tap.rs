@@ -3,6 +3,7 @@ use std::sync::mpsc::SyncSender;
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType};
 
+use crate::app_context;
 use crate::config::models::HotkeyTrigger;
 
 use super::mode::HotkeyEvent;
@@ -48,7 +49,9 @@ pub fn install(trigger: HotkeyTrigger, sender: SyncSender<HotkeyEvent>) -> anyho
             let active = (raw & device_mask) != 0;
 
             let hotkey_event = if active {
-                HotkeyEvent::KeyDown
+                // Capture frontmost app while on main thread, before the HUD shifts focus.
+                let bundle_id = app_context::frontmost_bundle_id();
+                HotkeyEvent::KeyDown(bundle_id)
             } else {
                 HotkeyEvent::KeyUp
             };

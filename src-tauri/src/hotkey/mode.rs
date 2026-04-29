@@ -1,22 +1,23 @@
 /// Recording state machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecordingState {
     Idle,
     Recording,
     Processing,
+    Error(String),
 }
 
 /// Commands sent from hotkey task → audio task.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum RecordingCommand {
-    Start,
+    Start(Option<String>), // source_app bundle ID captured at KeyDown
     Stop,
     Cancel,
 }
 
 /// Events emitted by the CGEventTap callback.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum HotkeyEvent {
-    KeyDown,
+    KeyDown(Option<String>), // frontmost bundle ID at press time
     KeyUp,
 }
