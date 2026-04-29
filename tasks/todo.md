@@ -22,15 +22,21 @@
 
 ## Bugs / gaps found during QA
 
-- [ ] **Hotkey change requires restart** — `set_config` saves new hotkey but the running CGEventTap still listens on the original key. Fix: expose a `restart_event_tap` command or store a `Sender<HotkeyTrigger>` in AppState so `set_config` can signal the tap to reinstall itself.
+- [ ] **Hotkey change requires restart** — `set_config` saves new hotkey but the running CGEventTap still listens on the original key. Fix: store a `Sender<HotkeyTrigger>` in AppState so `set_config` can signal the tap to reinstall itself without restarting the app.
 
 - [ ] **`show_hud` config ignored** — `panel::show()` is always called. In `lib.rs` hud_task, read `state.config` and skip `panel::show`/`hide` when `show_hud` is false.
 
 - [ ] **No error feedback on transcription failure** — errors are only logged. User sees HUD disappear with no indication something went wrong. Add an `Error(String)` variant to `RecordingState`, send it from the audio task on failure, display briefly in the HUD before hiding.
 
-- [ ] **source_app always None in history** — `app_context::frontmost_bundle_id()` exists but is never called. Capture it at `RecordingCommand::Start` time (before focus shifts) and thread it through to `store::insert`.
+- [ ] **source_app always None in history** — `app_context::frontmost_bundle_id()` exists but is never called. Capture it at `RecordingCommand::Start` time (before focus shifts to the HUD) and thread it through to `store::insert`.
 
-- [ ] **No first-launch onboarding** — if no API key is set, transcription silently fails. On first launch (config missing or api key absent), auto-show the settings window so user is prompted to configure.
+- [ ] **No first-launch onboarding** — if no API key is set, transcription silently fails. On first launch (config file absent or no key in keychain), auto-show the settings window so user is prompted to configure.
+
+- [ ] **Tray icon image doesn't change state** — `update_tray_icon` only sets tooltip. Plan requires distinct icon images for idle / recording / processing. Need icon assets and `tray.set_icon()` calls per state.
+
+- [ ] **Microphone permission hardcoded** — `has_microphone()` returns `true` unconditionally. Implement real `AVCaptureDevice.authorizationStatus` check via objc2 (or prompt user on first recording attempt if denied).
+
+- [ ] **Daemon module stubs unused** — `daemon/process.rs` + `daemon/rpc.rs` exist as empty stubs. Either implement for local Whisper subprocess, or delete if whisper-rs covers the use case.
 
 ---
 
@@ -38,13 +44,17 @@
 
 - [ ] Toggle recording mode (currently only press-and-hold)
 - [ ] Gemini transcription provider
-- [ ] Local Whisper via whisper-rs (whisper.cpp, no API call)
-- [ ] Semantic correction post-processing
-- [ ] Personal dictionary
+- [ ] Local Whisper via whisper-rs (whisper.cpp, static link, no API call)
+- [ ] WhisperKit provider (Apple Neural Engine, macOS 14+)
+- [ ] Parakeet / Whisper-MLX provider (Apple Silicon MLX)
+- [ ] Gemma provider
+- [ ] Semantic correction post-processing (`correction/semantic.rs`)
+- [ ] Personal dictionary (`correction/dictionary.rs`)
 - [ ] History search and retention settings UI
-- [ ] CoreAudio input volume boost
-- [ ] App-aware injection delay (5ms for terminal emulators vs 2ms default)
+- [ ] CoreAudio input volume boost (`audio/volume.rs`)
+- [ ] App-aware injection delay (5ms for terminal emulators vs 2ms default, uses `app_context::frontmost_bundle_id`)
 - [ ] CGEventTap health-check timer (re-enable tap every 5s if macOS silently disables it)
-- [ ] Completion sound (play_completion_sound config is wired but no audio playback)
-- [ ] Universal binary build + notarization + DMG packaging
+- [ ] Completion sound (`play_completion_sound` config wired, no audio playback yet)
+- [ ] GitHub repo — create at github.com/amirsalaar/whisp-rs when ready to share
+- [ ] Universal binary build + notarization + DMG packaging (`cargo tauri build --target universal-apple-darwin`)
 - [ ] GitHub Actions CI — build on push to main, release on version tag
