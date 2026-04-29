@@ -292,3 +292,31 @@ body {
   color: var(--text-muted);
   font-size: 13px;
 }
+
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.history-header h2 {
+  margin: 0;
+}
+
+.copy-btn {
+  background: none;
+  border: 1px solid var(--border, #444);
+  color: var(--text-muted, #999);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 42px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.copy-btn:hover {
+  color: var(--text, #eee);
+  border-color: var(--text-muted, #999);
+}

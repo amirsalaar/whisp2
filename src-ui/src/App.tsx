@@ -345,6 +345,19 @@ export default function App() {
               <label>
                 <input
                   type="checkbox"
+                  checked={config.play_completion_sound}
+                  onChange={(e) =>
+                    setConfig({ ...config, play_completion_sound: e.target.checked })
+                  }
+                />
+                Play completion sound after transcription
+              </label>
+            </div>
+
+            <div className="field checkbox">
+              <label>
+                <input
+                  type="checkbox"
                   checked={config.save_history}
                   onChange={(e) =>
                     setConfig({ ...config, save_history: e.target.checked })
@@ -384,6 +397,12 @@ export default function App() {
                       <span>{new Date(entry.created_at).toLocaleString()}</span>
                       <span>{entry.word_count}w</span>
                       {entry.source_app && <span>{entry.source_app}</span>}
+                      <button
+                        className="copy-btn"
+                        onClick={() => copyEntry(entry.id, entry.text)}
+                      >
+                        {copiedId === entry.id ? "✓" : "Copy"}
+                      </button>
                       <button
                         className="delete-btn"
                         onClick={() => deleteEntry(entry.id)}
