@@ -41,6 +41,7 @@ export default function App() {
   const [groqKey, setGroqKey] = useState("");
   const [groqKeyMasked, setGroqKeyMasked] = useState(true);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [accessibility, setAccessibility] = useState(true);
   const [statusMsg, setStatusMsg] = useState("");
@@ -85,6 +86,17 @@ export default function App() {
     } catch (e) {
       setStatusMsg(`Error: ${e}`);
     }
+  }
+
+  async function clearHistory() {
+    await invoke("clear_history");
+    setHistory([]);
+  }
+
+  async function copyEntry(id: string, text: string) {
+    await navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 1500);
   }
 
   async function deleteEntry(id: string) {
@@ -353,7 +365,14 @@ export default function App() {
 
         {tab === "history" && (
           <div className="panel">
-            <h2>Transcription History</h2>
+            <div className="history-header">
+              <h2>Transcription History</h2>
+              {history.length > 0 && (
+                <button className="btn-secondary" onClick={clearHistory}>
+                  Clear All
+                </button>
+              )}
+            </div>
             {history.length === 0 ? (
               <p className="empty">No transcriptions yet.</p>
             ) : (

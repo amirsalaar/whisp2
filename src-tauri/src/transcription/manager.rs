@@ -4,6 +4,7 @@ use std::time::Duration;
 use crate::config::models::{AppConfig, TranscriptionProvider};
 use crate::keychain;
 
+use super::providers::gemini::GeminiProvider;
 use super::providers::openai::OpenAIProvider;
 
 pub async fn transcribe(config: &AppConfig, wav_bytes: Vec<u8>) -> Result<String> {

@@ -11,7 +11,6 @@ pub mod audio;
 pub mod commands;
 pub mod config;
 pub mod correction;
-pub mod daemon;
 pub mod history;
 pub mod hotkey;
 pub mod hud;
