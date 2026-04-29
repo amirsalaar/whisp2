@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionProvider {
     OpenAI,
+    Groq,
     Gemini,
 }
 
@@ -49,6 +50,8 @@ pub struct AppConfig {
     pub hotkey: HotkeyTrigger,
     pub openai_api_url: String,
     pub openai_model: String,
+    pub groq_api_url: String,
+    pub groq_model: String,
     pub play_completion_sound: bool,
     pub save_history: bool,
     pub show_hud: bool,
@@ -63,6 +66,8 @@ impl Default for AppConfig {
             hotkey: HotkeyTrigger::default(),
             openai_api_url: "https://api.openai.com/v1/audio/transcriptions".into(),
             openai_model: "whisper-1".into(),
+            groq_api_url: "https://api.groq.com/openai/v1/audio/transcriptions".into(),
+            groq_model: "whisper-large-v3-turbo".into(),
             play_completion_sound: true,
             save_history: true,
             show_hud: true,

@@ -21,52 +21,47 @@ thread_local! {
 pub fn create() {
     let mtm = unsafe { MainThreadMarker::new_unchecked() };
 
-    unsafe {
-        let rect = CGRect::new(
-            CGPoint::new(0.0, 0.0),
-            CGSize::new(200.0, 80.0),
-        );
+    let rect = CGRect::new(
+        CGPoint::new(0.0, 0.0),
+        CGSize::new(200.0, 80.0),
+    );
 
-        let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
+    let style = NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel;
 
-        let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
-            mtm.alloc::<NSPanel>(),
-            rect,
-            style,
-            NSBackingStoreType::Buffered,
-            false,
-        );
+    let panel = NSPanel::initWithContentRect_styleMask_backing_defer(
+        mtm.alloc::<NSPanel>(),
+        rect,
+        style,
+        NSBackingStoreType::Buffered,
+        false,
+    );
 
-        panel.setFloatingPanel(true);
-        panel.setLevel(NSFloatingWindowLevel);
+    panel.setFloatingPanel(true);
+    panel.setLevel(NSFloatingWindowLevel);
 
-        let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
-            | NSWindowCollectionBehavior::Stationary
-            | NSWindowCollectionBehavior::FullScreenAuxiliary;
-        panel.setCollectionBehavior(behavior);
+    let behavior = NSWindowCollectionBehavior::CanJoinAllSpaces
+        | NSWindowCollectionBehavior::Stationary
+        | NSWindowCollectionBehavior::FullScreenAuxiliary;
+    panel.setCollectionBehavior(behavior);
 
-        // Ignore mouse events so the HUD is purely informational.
-        panel.setIgnoresMouseEvents(true);
+    // Ignore mouse events so the HUD is purely informational.
+    panel.setIgnoresMouseEvents(true);
 
-        // Center on screen initially.
-        panel.center();
+    // Center on screen initially.
+    panel.center();
 
-        HUD.with(|h| {
-            *h.borrow_mut() = Some(panel);
-        });
-    }
+    HUD.with(|h| {
+        *h.borrow_mut() = Some(panel);
+    });
 }
 
 /// Shows the HUD with a given title label. Main thread only.
 pub fn show(label: &str) {
     HUD.with(|h| {
         if let Some(panel) = h.borrow().as_ref() {
-            unsafe {
-                // Update title (used as accessibility label)
-                let title = NSString::from_str(label);
-                panel.setTitle(&title);
-                panel.orderFront(None);
-            }
+            let title = NSString::from_str(label);
+            panel.setTitle(&title);
+            panel.orderFront(None);
         }
     });
 }
@@ -75,9 +70,7 @@ pub fn show(label: &str) {
 pub fn hide() {
     HUD.with(|h| {
         if let Some(panel) = h.borrow().as_ref() {
-            unsafe {
-                panel.orderOut(None);
-            }
+            panel.orderOut(None);
         }
     });
 }

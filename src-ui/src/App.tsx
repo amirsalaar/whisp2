@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 interface AppConfig {
-  provider: "open_a_i" | "gemini";
+  provider: "open_a_i" | "groq" | "gemini";
   recording_mode: "press_and_hold" | "toggle";
   hotkey:
     | "left_option"
@@ -13,6 +13,8 @@ interface AppConfig {
     | "right_control";
   openai_api_url: string;
   openai_model: string;
+  groq_api_url: string;
+  groq_model: string;
   play_completion_sound: boolean;
   save_history: boolean;
   show_hud: boolean;
@@ -34,8 +36,10 @@ type Tab = "settings" | "history";
 export default function App() {
   const [tab, setTab] = useState<Tab>("settings");
   const [config, setConfig] = useState<AppConfig | null>(null);
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeyMasked, setApiKeyMasked] = useState(true);
+  const [openaiKey, setOpenaiKey] = useState("");
+  const [openaiKeyMasked, setOpenaiKeyMasked] = useState(true);
+  const [groqKey, setGroqKey] = useState("");
+  const [groqKeyMasked, setGroqKeyMasked] = useState(true);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [saving, setSaving] = useState(false);
   const [accessibility, setAccessibility] = useState(true);
@@ -45,7 +49,10 @@ export default function App() {
     invoke<AppConfig>("get_config").then(setConfig);
     invoke<boolean>("check_accessibility").then(setAccessibility);
     invoke<string | null>("get_api_key", { keyName: "openai_api_key" }).then(
-      (k) => k && setApiKey("••••••••")
+      (k) => k && setOpenaiKey("••••••••")
+    );
+    invoke<string | null>("get_api_key", { keyName: "groq_api_key" }).then(
+      (k) => k && setGroqKey("••••••••")
     );
   }, []);
 
@@ -69,11 +76,10 @@ export default function App() {
     }
   }
 
-  async function saveApiKey() {
+  async function saveKey(keyName: string, value: string, onSaved: () => void) {
     try {
-      await invoke("set_api_key", { keyName: "openai_api_key", value: apiKey });
-      setApiKey("••••••••");
-      setApiKeyMasked(true);
+      await invoke("set_api_key", { keyName, value });
+      onSaved();
       setStatusMsg("API key saved to Keychain.");
       setTimeout(() => setStatusMsg(""), 2000);
     } catch (e) {
@@ -134,58 +140,128 @@ export default function App() {
               <select
                 value={config.provider}
                 onChange={(e) =>
-                  setConfig({ ...config, provider: e.target.value as any })
+                  setConfig({ ...config, provider: e.target.value as AppConfig["provider"] })
                 }
               >
                 <option value="open_a_i">OpenAI Whisper</option>
+                <option value="groq">Groq Whisper</option>
                 <option value="gemini" disabled>
                   Gemini (coming soon)
                 </option>
               </select>
             </div>
 
-            <div className="field">
-              <label>OpenAI API Key</label>
-              <div className="input-row">
-                <input
-                  type={apiKeyMasked ? "password" : "text"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="sk-..."
-                  onFocus={() => {
-                    if (apiKeyMasked) setApiKey("");
-                    setApiKeyMasked(false);
-                  }}
-                />
-                <button className="btn-secondary" onClick={saveApiKey}>
-                  Save
-                </button>
-              </div>
-            </div>
+            {config.provider === "open_a_i" && (
+              <>
+                <div className="field">
+                  <label>OpenAI API Key</label>
+                  <div className="input-row">
+                    <input
+                      type={openaiKeyMasked ? "password" : "text"}
+                      value={openaiKey}
+                      onChange={(e) => setOpenaiKey(e.target.value)}
+                      placeholder="sk-..."
+                      onFocus={() => {
+                        if (openaiKeyMasked) setOpenaiKey("");
+                        setOpenaiKeyMasked(false);
+                      }}
+                    />
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        saveKey("openai_api_key", openaiKey, () => {
+                          setOpenaiKey("••••••••");
+                          setOpenaiKeyMasked(true);
+                        })
+                      }
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
 
-            <div className="field">
-              <label>API URL</label>
-              <input
-                type="text"
-                value={config.openai_api_url}
-                onChange={(e) =>
-                  setConfig({ ...config, openai_api_url: e.target.value })
-                }
-              />
-            </div>
+                <div className="field">
+                  <label>API URL</label>
+                  <input
+                    type="text"
+                    value={config.openai_api_url}
+                    onChange={(e) =>
+                      setConfig({ ...config, openai_api_url: e.target.value })
+                    }
+                  />
+                </div>
 
-            <div className="field">
-              <label>Model</label>
-              <select
-                value={config.openai_model}
-                onChange={(e) =>
-                  setConfig({ ...config, openai_model: e.target.value })
-                }
-              >
-                <option value="whisper-1">whisper-1</option>
-                <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
-              </select>
-            </div>
+                <div className="field">
+                  <label>Model</label>
+                  <select
+                    value={config.openai_model}
+                    onChange={(e) =>
+                      setConfig({ ...config, openai_model: e.target.value })
+                    }
+                  >
+                    <option value="whisper-1">whisper-1</option>
+                    <option value="gpt-4o-transcribe">gpt-4o-transcribe</option>
+                    <option value="gpt-4o-mini-transcribe">gpt-4o-mini-transcribe</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            {config.provider === "groq" && (
+              <>
+                <div className="field">
+                  <label>Groq API Key</label>
+                  <div className="input-row">
+                    <input
+                      type={groqKeyMasked ? "password" : "text"}
+                      value={groqKey}
+                      onChange={(e) => setGroqKey(e.target.value)}
+                      placeholder="gsk_..."
+                      onFocus={() => {
+                        if (groqKeyMasked) setGroqKey("");
+                        setGroqKeyMasked(false);
+                      }}
+                    />
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        saveKey("groq_api_key", groqKey, () => {
+                          setGroqKey("••••••••");
+                          setGroqKeyMasked(true);
+                        })
+                      }
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>API URL</label>
+                  <input
+                    type="text"
+                    value={config.groq_api_url}
+                    onChange={(e) =>
+                      setConfig({ ...config, groq_api_url: e.target.value })
+                    }
+                  />
+                </div>
+
+                <div className="field">
+                  <label>Model</label>
+                  <select
+                    value={config.groq_model}
+                    onChange={(e) =>
+                      setConfig({ ...config, groq_model: e.target.value })
+                    }
+                  >
+                    <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
+                    <option value="whisper-large-v3">whisper-large-v3</option>
+                    <option value="distil-whisper-large-v3-en">distil-whisper-large-v3-en</option>
+                  </select>
+                </div>
+              </>
+            )}
 
             <div className="field">
               <label>Language (optional)</label>
@@ -209,7 +285,7 @@ export default function App() {
               <select
                 value={config.hotkey}
                 onChange={(e) =>
-                  setConfig({ ...config, hotkey: e.target.value as any })
+                  setConfig({ ...config, hotkey: e.target.value as AppConfig["hotkey"] })
                 }
               >
                 <option value="right_command">Right Command ⌘</option>
@@ -227,7 +303,7 @@ export default function App() {
                 onChange={(e) =>
                   setConfig({
                     ...config,
-                    recording_mode: e.target.value as any,
+                    recording_mode: e.target.value as AppConfig["recording_mode"],
                   })
                 }
               >

@@ -1,7 +1,7 @@
 use std::sync::mpsc::SyncSender;
 
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
-use core_graphics::event::{CGEventFlags, CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType};
+use core_graphics::event::{CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType};
 
 use crate::config::models::HotkeyTrigger;
 

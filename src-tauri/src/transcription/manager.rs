@@ -19,6 +19,17 @@ pub async fn transcribe(config: &AppConfig, wav_bytes: Vec<u8>) -> Result<String
             transcribe_with_retry(|| provider.transcribe(wav_bytes.clone(), config.language.as_deref()))
                 .await
         }
+        TranscriptionProvider::Groq => {
+            let api_key = keychain::get("groq_api_key")?
+                .ok_or_else(|| anyhow::anyhow!("Groq API key not set. Open Settings to configure."))?;
+            let provider = OpenAIProvider::new(
+                api_key,
+                config.groq_api_url.clone(),
+                config.groq_model.clone(),
+            );
+            transcribe_with_retry(|| provider.transcribe(wav_bytes.clone(), config.language.as_deref()))
+                .await
+        }
         TranscriptionProvider::Gemini => {
             Err(anyhow::anyhow!("Gemini provider not yet implemented"))
         }
