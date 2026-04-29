@@ -15,6 +15,7 @@ interface AppConfig {
   openai_model: string;
   groq_api_url: string;
   groq_model: string;
+  gemini_model: string;
   play_completion_sound: boolean;
   save_history: boolean;
   show_hud: boolean;
@@ -31,7 +32,12 @@ interface HistoryEntry {
   created_at: string;
 }
 
-type Tab = "settings" | "history";
+interface DictEntry {
+  from: string;
+  to: string;
+}
+
+type Tab = "settings" | "history" | "dictionary";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("settings");
@@ -40,11 +46,16 @@ export default function App() {
   const [openaiKeyMasked, setOpenaiKeyMasked] = useState(true);
   const [groqKey, setGroqKey] = useState("");
   const [groqKeyMasked, setGroqKeyMasked] = useState(true);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [geminiKeyMasked, setGeminiKeyMasked] = useState(true);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [accessibility, setAccessibility] = useState(true);
   const [statusMsg, setStatusMsg] = useState("");
+  const [dictEntries, setDictEntries] = useState<DictEntry[]>([]);
+  const [dictFrom, setDictFrom] = useState("");
+  const [dictTo, setDictTo] = useState("");
 
   useEffect(() => {
     invoke<AppConfig>("get_config").then(setConfig);
@@ -54,6 +65,9 @@ export default function App() {
     );
     invoke<string | null>("get_api_key", { keyName: "groq_api_key" }).then(
       (k) => k && setGroqKey("••••••••")
+    );
+    invoke<string | null>("get_api_key", { keyName: "gemini_api_key" }).then(
+      (k) => k && setGeminiKey("••••••••")
     );
   }, []);
 
@@ -157,9 +171,7 @@ export default function App() {
               >
                 <option value="open_a_i">OpenAI Whisper</option>
                 <option value="groq">Groq Whisper</option>
-                <option value="gemini" disabled>
-                  Gemini (coming soon)
-                </option>
+                <option value="gemini">Gemini</option>
               </select>
             </div>
 
@@ -270,6 +282,51 @@ export default function App() {
                     <option value="whisper-large-v3-turbo">whisper-large-v3-turbo</option>
                     <option value="whisper-large-v3">whisper-large-v3</option>
                     <option value="distil-whisper-large-v3-en">distil-whisper-large-v3-en</option>
+                  </select>
+                </div>
+              </>
+            )}
+
+            {config.provider === "gemini" && (
+              <>
+                <div className="field">
+                  <label>Gemini API Key</label>
+                  <div className="input-row">
+                    <input
+                      type={geminiKeyMasked ? "password" : "text"}
+                      value={geminiKey}
+                      onChange={(e) => setGeminiKey(e.target.value)}
+                      placeholder="AIza..."
+                      onFocus={() => {
+                        if (geminiKeyMasked) setGeminiKey("");
+                        setGeminiKeyMasked(false);
+                      }}
+                    />
+                    <button
+                      className="btn-secondary"
+                      onClick={() =>
+                        saveKey("gemini_api_key", geminiKey, () => {
+                          setGeminiKey("••••••••");
+                          setGeminiKeyMasked(true);
+                        })
+                      }
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+
+                <div className="field">
+                  <label>Model</label>
+                  <select
+                    value={config.gemini_model}
+                    onChange={(e) =>
+                      setConfig({ ...config, gemini_model: e.target.value })
+                    }
+                  >
+                    <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                    <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                    <option value="gemini-1.5-pro">gemini-1.5-pro</option>
                   </select>
                 </div>
               </>
