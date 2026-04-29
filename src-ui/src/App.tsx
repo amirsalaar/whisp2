@@ -20,6 +20,7 @@ interface AppConfig {
   save_history: boolean;
   show_hud: boolean;
   language: string | null;
+  max_history_entries: number | null;
 }
 
 interface HistoryEntry {
@@ -52,6 +53,8 @@ export default function App() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [accessibility, setAccessibility] = useState(true);
+  const [microphone, setMicrophone] = useState(true);
+  const [historySearch, setHistorySearch] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
   const [dictEntries, setDictEntries] = useState<DictEntry[]>([]);
   const [dictFrom, setDictFrom] = useState("");
@@ -60,6 +63,7 @@ export default function App() {
   useEffect(() => {
     invoke<AppConfig>("get_config").then(setConfig);
     invoke<boolean>("check_accessibility").then(setAccessibility);
+    invoke<boolean>("check_microphone").then(setMicrophone);
     invoke<string | null>("get_api_key", { keyName: "openai_api_key" }).then(
       (k) => k && setOpenaiKey("••••••••")
     );
@@ -179,6 +183,21 @@ export default function App() {
               onClick={() => invoke("open_accessibility_settings")}
             >
               Open Settings →
+            </button>
+          </div>
+        )}
+        {!microphone && (
+          <div className="banner warning">
+            <strong>Microphone permission required</strong> — recording is
+            disabled.{" "}
+            <button
+              className="link-btn"
+              onClick={() => {
+                invoke("request_microphone");
+                setTimeout(() => invoke<boolean>("check_microphone").then(setMicrophone), 3000);
+              }}
+            >
+              Request Access →
             </button>
           </div>
         )}
@@ -448,6 +467,29 @@ export default function App() {
               </label>
             </div>
 
+            {config.save_history && (
+              <div className="field">
+                <label>Keep at most</label>
+                <div className="input-row">
+                  <select
+                    value={config.max_history_entries ?? ""}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        max_history_entries: e.target.value ? Number(e.target.value) : null,
+                      })
+                    }
+                  >
+                    <option value="">Unlimited</option>
+                    <option value="100">100 entries</option>
+                    <option value="250">250 entries</option>
+                    <option value="500">500 entries</option>
+                    <option value="1000">1000 entries</option>
+                  </select>
+                </div>
+              </div>
+            )}
+
             <div className="actions">
               <button className="btn-primary" onClick={saveConfig} disabled={saving}>
                 {saving ? "Saving..." : "Save Settings"}
@@ -467,11 +509,25 @@ export default function App() {
                 </button>
               )}
             </div>
+            {history.length > 0 && (
+              <input
+                className="search-input"
+                type="search"
+                placeholder="Search transcriptions..."
+                value={historySearch}
+                onChange={(e) => setHistorySearch(e.target.value)}
+              />
+            )}
             {history.length === 0 ? (
               <p className="empty">No transcriptions yet.</p>
             ) : (
               <ul className="history-list">
-                {history.map((entry) => (
+                {history
+                  .filter((e) =>
+                    historySearch === "" ||
+                    e.text.toLowerCase().includes(historySearch.toLowerCase())
+                  )
+                  .map((entry) => (
                   <li key={entry.id} className="history-entry">
                     <div className="entry-text">{entry.text}</div>
                     <div className="entry-meta">

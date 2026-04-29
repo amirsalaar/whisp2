@@ -57,6 +57,8 @@ pub struct AppConfig {
     pub save_history: bool,
     pub show_hud: bool,
     pub language: Option<String>,
+    /// Maximum number of history entries to keep. None = unlimited.
+    pub max_history_entries: Option<usize>,
 }
 
 impl Default for AppConfig {
@@ -74,6 +76,7 @@ impl Default for AppConfig {
             save_history: true,
             show_hud: true,
             language: None,
+            max_history_entries: Some(500),
         }
     }
 }

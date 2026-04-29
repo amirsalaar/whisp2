@@ -9,3 +9,13 @@ pub fn check_accessibility() -> bool {
 pub fn open_accessibility_settings() {
     permissions::open_accessibility_settings();
 }
+
+#[tauri::command]
+pub fn check_microphone() -> bool {
+    permissions::has_microphone()
+}
+
+#[tauri::command]
+pub fn request_microphone() {
+    permissions::request_microphone_access();
+}

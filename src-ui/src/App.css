@@ -320,3 +320,19 @@ body {
   color: var(--text, #eee);
   border-color: var(--text-muted, #999);
 }
+
+.search-input {
+  width: 100%;
+  margin-bottom: 0.75rem;
+  padding: 6px 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}

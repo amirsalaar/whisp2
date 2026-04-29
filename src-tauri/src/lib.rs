@@ -166,6 +166,10 @@ pub fn spawn_tasks(
                                                         .await
                                                         {
                                                             tracing::warn!("history insert failed: {}", e);
+                                                        } else if let Some(max) = config.max_history_entries {
+                                                            if let Err(e) = crate::history::store::prune(&db, max).await {
+                                                                tracing::warn!("history prune failed: {}", e);
+                                                            }
                                                         }
                                                     }
                                                     let _ = text_tx.send((text, app_id)).await;

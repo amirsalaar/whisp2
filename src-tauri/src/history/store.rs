@@ -116,3 +116,16 @@ pub async fn delete_all(pool: &SqlitePool) -> Result<()> {
     sqlx::query("DELETE FROM history").execute(pool).await?;
     Ok(())
 }
+
+/// Deletes oldest entries so at most `max` rows remain.
+pub async fn prune(pool: &SqlitePool, max: usize) -> Result<()> {
+    sqlx::query(
+        "DELETE FROM history WHERE id NOT IN (
+             SELECT id FROM history ORDER BY created_at DESC LIMIT ?
+         )",
+    )
+    .bind(max as i64)
+    .execute(pool)
+    .await?;
+    Ok(())
+}

@@ -77,6 +77,8 @@ async fn main() {
             clear_history,
             check_accessibility,
             open_accessibility_settings,
+            check_microphone,
+            request_microphone,
             get_dictionary,
             add_dictionary_entry,
             remove_dictionary_entry,
