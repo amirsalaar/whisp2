@@ -166,6 +166,7 @@ pub fn spawn_tasks(
 
     // --- hud_task ---
     let ah_hud = app_handle.clone();
+    let state_hud = Arc::clone(&state);
     rt.spawn(async move {
         loop {
             match state_rx.recv().await {
@@ -176,10 +177,11 @@ pub fn spawn_tasks(
                         RecordingState::Processing => "Processing...",
                     };
                     let label = label.to_string();
+                    let show_hud = state_hud.config.read().unwrap().show_hud;
                     let _ = ah_hud.run_on_main_thread(move || {
                         if label.is_empty() {
                             hud::panel::hide();
-                        } else {
+                        } else if show_hud {
                             hud::panel::show(&label);
                         }
                     });
