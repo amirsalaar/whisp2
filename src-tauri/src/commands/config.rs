@@ -1,7 +1,10 @@
+use std::sync::atomic::Ordering;
+
 use tauri::State;
 
 use crate::config::models::AppConfig;
 use crate::config::persistence;
+use crate::hotkey::event_tap::device_mask_for_trigger;
 use crate::AppState;
 
 #[tauri::command]
@@ -12,6 +15,10 @@ pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
+    // Update the live hotkey mask so the CGEventTap picks up the change immediately.
+    let new_mask = device_mask_for_trigger(&config.hotkey);
+    state.hotkey_mask.store(new_mask, Ordering::Relaxed);
+
     {
         let mut lock = state.config.write().unwrap();
         *lock = config.clone();

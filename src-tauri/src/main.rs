@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::{mpsc, Arc, RwLock};
+use std::sync::atomic::AtomicU64;
 
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
@@ -53,6 +54,8 @@ async fn main() {
     let app_state = AppState {
         config: Arc::new(RwLock::new(config)),
         db: db.clone(),
+        // Mask starts at 0; event_tap::install() sets the real value in setup.
+        hotkey_mask: Arc::new(AtomicU64::new(0)),
     };
 
     // Channel for CGEventTap → hotkey task
@@ -116,9 +119,14 @@ async fn main() {
             // Create the floating HUD panel (must be on main thread)
             panel::create();
 
-            // Install CGEventTap (requires Accessibility permission)
+            // Install CGEventTap (requires Accessibility permission).
+            // Pass state_arc.hotkey_mask so the tap and set_config share the same Arc.
             if permissions::has_accessibility() {
-                if let Err(e) = event_tap::install(hotkey, hotkey_tx) {
+                if let Err(e) = event_tap::install(
+                    hotkey,
+                    hotkey_tx,
+                    Arc::clone(&state_arc.hotkey_mask),
+                ) {
                     tracing::error!("CGEventTap install failed: {}", e);
                 }
             } else {

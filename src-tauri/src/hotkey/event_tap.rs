@@ -1,4 +1,5 @@
-use std::sync::mpsc::SyncSender;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, mpsc::SyncSender};
 
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType};
@@ -16,8 +17,7 @@ const NX_DEVICELALTKEYMASK: u64 = 0x0000_0020;
 const NX_DEVICERALTKEYMASK: u64 = 0x0000_0040;
 const NX_DEVICERCTLKEYMASK: u64 = 0x0000_2000;
 
-/// Returns the raw device-specific bitmask for the configured hotkey trigger.
-fn device_mask_for_trigger(trigger: &HotkeyTrigger) -> u64 {
+pub fn device_mask_for_trigger(trigger: &HotkeyTrigger) -> u64 {
     match trigger {
         HotkeyTrigger::LeftOption => NX_DEVICELALTKEYMASK,
         HotkeyTrigger::RightOption => NX_DEVICERALTKEYMASK,
@@ -31,19 +31,28 @@ fn device_mask_for_trigger(trigger: &HotkeyTrigger) -> u64 {
 /// changes. When the configured hotkey is pressed/released, sends HotkeyEvent
 /// over the provided SyncSender.
 ///
+/// `mask_atom` is a shared `Arc<AtomicU64>` that controls which modifier bitmask the
+/// tap watches. Store a clone in `AppState` and write a new mask via
+/// `device_mask_for_trigger` whenever the user changes the hotkey — no restart needed.
+///
 /// Must be called from the main thread.
 /// Requires Accessibility permission (AXIsProcessTrusted).
-pub fn install(trigger: HotkeyTrigger, sender: SyncSender<HotkeyEvent>) -> anyhow::Result<()> {
-    let device_mask = device_mask_for_trigger(&trigger);
+pub fn install(
+    trigger: HotkeyTrigger,
+    sender: SyncSender<HotkeyEvent>,
+    mask_atom: Arc<AtomicU64>,
+) -> anyhow::Result<()> {
+    let initial_mask = device_mask_for_trigger(&trigger);
+    mask_atom.store(initial_mask, Ordering::Relaxed);
+    let mask_atom_cb = Arc::clone(&mask_atom);
 
-    // CGEventTap::new takes a callback. We use a move closure that captures
-    // device_mask and sender.
     let tap = CGEventTap::new(
         CGEventTapLocation::HID,
         CGEventTapPlacement::HeadInsertEventTap,
         CGEventTapOptions::ListenOnly,
         vec![CGEventType::FlagsChanged],
         move |_proxy, _event_type, event| {
+            let device_mask = mask_atom_cb.load(Ordering::Relaxed);
             let flags = event.get_flags();
             let raw: u64 = flags.bits();
             let active = (raw & device_mask) != 0;

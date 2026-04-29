@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 
@@ -23,6 +24,9 @@ pub mod transcription;
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     pub db: sqlx::SqlitePool,
+    /// Shared atomic holding the current CGEventTap device mask.
+    /// Updating this at runtime changes the active hotkey without restarting.
+    pub hotkey_mask: Arc<AtomicU64>,
 }
 
 /// Spawns all background async tasks. Called once inside Tauri's `setup` hook.
