@@ -16,9 +16,24 @@ pub fn open_accessibility_settings() {
     let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
-/// Returns true if the app has microphone permission.
+/// Returns true if the app has been granted microphone permission.
+/// Uses AVCaptureDevice +authorizationStatusForMediaType: to check the real status.
 pub fn has_microphone() -> bool {
-    // cpal will surface the error naturally if mic is denied.
-    // Full AVCaptureDevice auth check deferred to v2.
-    true
+    use objc2::msg_send;
+    use objc2::runtime::AnyClass;
+    use objc2_foundation::NSString;
+
+    #[link(name = "AVFoundation", kind = "framework")]
+    extern "C" {}
+
+    unsafe {
+        let cls = match AnyClass::get(c"AVCaptureDevice") {
+            Some(c) => c,
+            None => return false,
+        };
+        // AVMediaTypeAudio = "soun"
+        let media_type = NSString::from_str("soun");
+        let status: i64 = msg_send![cls, authorizationStatusForMediaType: &*media_type];
+        status == 1 // AVAuthorizationStatusAuthorized = 1
+    }
 }
