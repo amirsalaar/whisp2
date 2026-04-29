@@ -198,13 +198,17 @@ pub fn spawn_tasks(
 
     // --- injection_task ---
     let ah_inj = app_handle.clone();
+    let state_inj = Arc::clone(&state);
     rt.spawn(async move {
         loop {
             match text_rx.recv().await {
                 Some(text) => {
+                    let play_sound = state_inj.config.read().unwrap().play_completion_sound;
                     let _ = ah_inj.run_on_main_thread(move || {
                         if let Err(e) = injection::text::type_text(&text) {
                             tracing::error!("text injection failed: {}", e);
+                        } else if play_sound {
+                            std::thread::spawn(|| audio::sound::play());
                         }
                     });
                 }
