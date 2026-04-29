@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, mpsc::SyncSender};
 
+use core_foundation::base::TCFType;
+use core_foundation::mach_port::CFMachPortRef;
 use core_foundation::runloop::{kCFRunLoopCommonModes, CFRunLoop};
 use core_graphics::event::{CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType};
 
@@ -10,12 +12,15 @@ use crate::config::models::HotkeyTrigger;
 use super::mode::HotkeyEvent;
 
 // Raw device-specific modifier flag bitmasks (from IOKit NXEventPrivate.h)
-// These distinguish Left vs Right modifier keys within CGEventFlags.
 const NX_DEVICELCMDKEYMASK: u64 = 0x0000_0008;
 const NX_DEVICERCMDKEYMASK: u64 = 0x0000_0010;
 const NX_DEVICELALTKEYMASK: u64 = 0x0000_0020;
 const NX_DEVICERALTKEYMASK: u64 = 0x0000_0040;
 const NX_DEVICERCTLKEYMASK: u64 = 0x0000_2000;
+
+extern "C" {
+    fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
+}
 
 pub fn device_mask_for_trigger(trigger: &HotkeyTrigger) -> u64 {
     match trigger {
@@ -27,13 +32,13 @@ pub fn device_mask_for_trigger(trigger: &HotkeyTrigger) -> u64 {
     }
 }
 
-/// Installs a CGEventTap on the main thread's run loop that monitors modifier key
-/// changes. When the configured hotkey is pressed/released, sends HotkeyEvent
-/// over the provided SyncSender.
+/// Installs a CGEventTap on the main thread's run loop.
 ///
-/// `mask_atom` is a shared `Arc<AtomicU64>` that controls which modifier bitmask the
-/// tap watches. Store a clone in `AppState` and write a new mask via
-/// `device_mask_for_trigger` whenever the user changes the hotkey — no restart needed.
+/// `mask_atom` is shared with `AppState` — write a new value via `device_mask_for_trigger`
+/// to change the active hotkey at runtime without reinstalling the tap.
+///
+/// Spawns a background thread that re-enables the tap every 5 s. macOS silently
+/// disables taps whose callbacks are too slow; this ensures it stays active.
 ///
 /// Must be called from the main thread.
 /// Requires Accessibility permission (AXIsProcessTrusted).
@@ -65,7 +70,6 @@ pub fn install(
                 HotkeyEvent::KeyUp
             };
 
-            // Non-blocking send — drop events if the receiver isn't keeping up.
             let _ = sender.try_send(hotkey_event);
             None
         },
@@ -86,9 +90,25 @@ pub fn install(
     }
     tap.enable();
 
-    // Keep tap alive for the process lifetime (leak is intentional here).
+    // Extract the raw mach port ref as a usize so we can send it to the health-check thread.
+    // Safety: the tap is kept alive by std::mem::forget below; the port remains valid for
+    // the process lifetime. TCFType is in scope via the use above.
+    let port_ref = TCFType::as_concrete_TypeRef(&tap.mach_port) as usize;
+
+    // Keep tap and runloop source alive for the process lifetime.
     std::mem::forget(tap);
     std::mem::forget(loop_source);
+
+    // Health-check thread: re-enable the tap every 5 s in case macOS silently disabled it.
+    std::thread::Builder::new()
+        .name("cgeventtap-health".into())
+        .spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            unsafe {
+                CGEventTapEnable(port_ref as CFMachPortRef, true);
+            }
+        })
+        .expect("failed to spawn cgeventtap-health thread");
 
     tracing::info!("CGEventTap installed for {:?}", trigger);
     Ok(())
