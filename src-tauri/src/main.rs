@@ -11,7 +11,7 @@ use tauri::{
 };
 
 use whisp_rs_lib::{
-    commands::{config::*, history::*, permissions::*},
+    commands::{config::*, dictionary::*, history::*, permissions::*},
     config::persistence,
     history::store,
     hotkey::{event_tap, mode::HotkeyEvent},
@@ -74,6 +74,9 @@ async fn main() {
             clear_history,
             check_accessibility,
             open_accessibility_settings,
+            get_dictionary,
+            add_dictionary_entry,
+            remove_dictionary_entry,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();

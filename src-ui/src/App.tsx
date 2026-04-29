@@ -75,7 +75,27 @@ export default function App() {
     if (tab === "history") {
       invoke<HistoryEntry[]>("get_history", { limit: 100 }).then(setHistory);
     }
+    if (tab === "dictionary") {
+      loadDictionary();
+    }
   }, [tab]);
+
+  async function loadDictionary() {
+    invoke<DictEntry[]>("get_dictionary").then(setDictEntries);
+  }
+
+  async function addEntry() {
+    if (!dictFrom.trim()) return;
+    await invoke("add_dictionary_entry", { from: dictFrom.trim(), to: dictTo.trim() });
+    setDictFrom("");
+    setDictTo("");
+    await loadDictionary();
+  }
+
+  async function removeEntry(from: string) {
+    await invoke("remove_dictionary_entry", { from });
+    await loadDictionary();
+  }
 
   async function saveConfig() {
     if (!config) return;
@@ -140,6 +160,12 @@ export default function App() {
           onClick={() => setTab("history")}
         >
           History
+        </button>
+        <button
+          className={`nav-item ${tab === "dictionary" ? "active" : ""}`}
+          onClick={() => setTab("dictionary")}
+        >
+          Dictionary
         </button>
       </nav>
 
@@ -463,6 +489,56 @@ export default function App() {
                       <button
                         className="delete-btn"
                         onClick={() => deleteEntry(entry.id)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        {tab === "dictionary" && (
+          <div className="panel">
+            <h2>Personal Dictionary</h2>
+            <p className="empty" style={{ marginBottom: "1rem" }}>
+              Substitutions applied after every transcription. Matches whole words.
+            </p>
+            <div className="input-row" style={{ marginBottom: "1rem" }}>
+              <input
+                type="text"
+                placeholder="From (e.g. whisp rs)"
+                value={dictFrom}
+                onChange={(e) => setDictFrom(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addEntry()}
+              />
+              <input
+                type="text"
+                placeholder="To (e.g. whisp-rs)"
+                value={dictTo}
+                onChange={(e) => setDictTo(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addEntry()}
+              />
+              <button className="btn-primary" onClick={addEntry}>
+                Add
+              </button>
+            </div>
+            {dictEntries.length === 0 ? (
+              <p className="empty">No substitutions yet.</p>
+            ) : (
+              <ul className="history-list">
+                {dictEntries.map((entry) => (
+                  <li key={entry.from} className="history-entry">
+                    <div className="entry-text">
+                      <span>{entry.from}</span>
+                      <span style={{ margin: "0 0.5rem", opacity: 0.5 }}>→</span>
+                      <span>{entry.to}</span>
+                    </div>
+                    <div className="entry-meta">
+                      <button
+                        className="delete-btn"
+                        onClick={() => removeEntry(entry.from)}
                       >
                         ✕
                       </button>
