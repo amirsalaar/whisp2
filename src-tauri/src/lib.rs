@@ -219,14 +219,44 @@ pub fn spawn_tasks(
 }
 
 fn update_tray_icon(app: &tauri::AppHandle, state: RecordingState) {
-    // Update the tray icon tooltip to reflect current state.
-    // Icon image swapping requires tray handle — done via app menu update.
     let tooltip = match state {
         RecordingState::Idle => "Whisp",
         RecordingState::Recording => "Whisp — Recording",
         RecordingState::Processing => "Whisp — Processing",
     };
+
+    // 22x22 RGBA icon: different fill color per state
+    // Idle: grey circle, Recording: red filled, Processing: yellow filled
+    let (fg_r, fg_g, fg_b) = match state {
+        RecordingState::Idle => (200u8, 200u8, 200u8),
+        RecordingState::Recording => (230u8, 50u8, 50u8),
+        RecordingState::Processing => (230u8, 180u8, 50u8),
+    };
+
+    let size: u32 = 22;
+    let cx = size as f32 / 2.0;
+    let radius = (size as f32 / 2.0) - 1.5;
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    for y in 0..size {
+        for x in 0..size {
+            let dx = x as f32 - cx + 0.5;
+            let dy = y as f32 - cx + 0.5;
+            let dist = (dx * dx + dy * dy).sqrt();
+            let idx = ((y * size + x) * 4) as usize;
+            if dist <= radius {
+                pixels[idx] = fg_r;
+                pixels[idx + 1] = fg_g;
+                pixels[idx + 2] = fg_b;
+                pixels[idx + 3] = 220;
+            } else {
+                pixels[idx + 3] = 0; // transparent
+            }
+        }
+    }
+
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(tooltip));
+        let img = tauri::image::Image::new_owned(pixels, size, size);
+        let _ = tray.set_icon(Some(img));
     }
 }
