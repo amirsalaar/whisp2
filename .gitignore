@@ -1,0 +1,5 @@
+target/
+src-ui/node_modules/
+src-ui/dist/
+*.DS_Store
+.env
