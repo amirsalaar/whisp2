@@ -1,0 +1,14 @@
+/Users/asojoudi/rescale/personal/whisp-rs/target/debug/deps/clang_sys-bacce18af4c27a7c.d: /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/lib.rs /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/support.rs /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/link.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/macros.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/common.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/dynamic.rs
+
+/Users/asojoudi/rescale/personal/whisp-rs/target/debug/deps/libclang_sys-bacce18af4c27a7c.rlib: /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/lib.rs /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/support.rs /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/link.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/macros.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/common.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/dynamic.rs
+
+/Users/asojoudi/rescale/personal/whisp-rs/target/debug/deps/libclang_sys-bacce18af4c27a7c.rmeta: /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/lib.rs /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/support.rs /Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/link.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/macros.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/common.rs /Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/dynamic.rs
+
+/Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/lib.rs:
+/Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/support.rs:
+/Users/asojoudi/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/clang-sys-1.8.1/src/link.rs:
+/Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/macros.rs:
+/Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/common.rs:
+/Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out/dynamic.rs:
+
+# env-dep:OUT_DIR=/Users/asojoudi/rescale/personal/whisp-rs/target/debug/build/clang-sys-414c893ed9493fe4/out

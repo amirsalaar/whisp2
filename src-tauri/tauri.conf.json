@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Whisp",
+  "identifier": "com.whisp.whisp-rs",
+  "version": "0.1.0",
+  "app": {
+    "windows": [
+      {
+        "label": "settings",
+        "title": "Whisp Settings",
+        "width": 680,
+        "height": 560,
+        "visible": false,
+        "resizable": true,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "build": {
+    "frontendDist": "../src-ui/dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "cd ../src-ui && npm run dev",
+    "beforeBuildCommand": "cd ../src-ui && npm run build"
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/icon.png"
+    ],
+    "category": "Utility",
+    "macOS": {
+      "entitlements": "entitlements.plist",
+      "minimumSystemVersion": "13.0"
+    }
+  }
+}

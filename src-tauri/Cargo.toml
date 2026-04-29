@@ -1,0 +1,115 @@
+[package]
+name = "whisp-rs"
+version = "0.1.0"
+edition = "2021"
+description = "macOS voice-to-text menu bar app"
+
+[[bin]]
+name = "whisp-rs"
+path = "src/main.rs"
+
+[lib]
+name = "whisp_rs_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["multipart", "json", "stream"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Config / filesystem paths
+directories = "5"
+
+# macOS Security framework (Keychain)
+security-framework = "3"
+
+# SQLite (async)
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
+
+# Audio capture
+cpal = "0.15"
+rubato = "0.15"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Base64 (for audio encoding to API)
+base64 = "0.22"
+
+# WAV encoding (in-memory)
+hound = "3"
+
+# macOS low-level bindings (CGEventTap, NSPanel, etc.)
+core-foundation = "0.10"
+core-graphics = { version = "0.24", features = ["highsierra"] }
+
+# Objective-C2 runtime bindings
+objc2 = "0.6"
+objc2-core-foundation = "0.3"
+objc2-foundation = { version = "0.3", features = [
+  "NSString",
+  "NSArray",
+  "NSRunLoop",
+  "NSNotification",
+  "NSUserDefaults",
+  "NSGeometry",
+  "objc2-core-foundation",
+] }
+objc2-app-kit = { version = "0.3", features = [
+  "NSApplication",
+  "NSPanel",
+  "NSWindow",
+  "NSView",
+  "NSMenu",
+  "NSMenuItem",
+  "NSStatusBar",
+  "NSStatusItem",
+  "NSImage",
+  "NSColor",
+  "NSWorkspace",
+  "NSRunningApplication",
+  "NSGraphics",
+  "NSResponder",
+] }
+
+# UUID for record IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Chrono for timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async trait
+async-trait = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS-specific only
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = true
+codegen-units = 1
