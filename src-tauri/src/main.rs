@@ -84,6 +84,9 @@ async fn main() {
             check_microphone,
             request_microphone,
             open_microphone_settings,
+            check_input_monitoring,
+            request_input_monitoring,
+            open_input_monitoring_settings,
             open_model_url,
             get_dictionary,
             add_dictionary_entry,
@@ -136,6 +139,12 @@ async fn main() {
             // Install CGEventTap (requires Accessibility permission).
             // Pass state_arc.hotkey_mask so the tap and set_config share the same Arc.
             if permissions::has_accessibility() {
+                if !permissions::has_input_monitoring() {
+                    tracing::warn!(
+                        "Input Monitoring permission not granted — CGEventTap may be silently \
+                         disabled by macOS. Open Settings → Privacy & Security → Input Monitoring."
+                    );
+                }
                 if let Err(e) = event_tap::install(
                     hotkey,
                     hotkey_tx,

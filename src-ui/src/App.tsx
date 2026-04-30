@@ -118,6 +118,7 @@ export default function App() {
   const [saving, setSaving] = useState(false);
   const [accessibility, setAccessibility] = useState<boolean | null>(null);
   const [microphone, setMicrophone] = useState<boolean | null>(null);
+  const [inputMonitoring, setInputMonitoring] = useState<boolean | null>(null);
   const [checkingPerms, setCheckingPerms] = useState(false);
   const [historySearch, setHistorySearch] = useState("");
   const [statusMsg, setStatusMsg] = useState("");
@@ -132,12 +133,14 @@ export default function App() {
 
   async function refreshPermissions() {
     setCheckingPerms(true);
-    const [a, m] = await Promise.all([
+    const [a, m, im] = await Promise.all([
       invoke<boolean>("check_accessibility"),
       invoke<boolean>("check_microphone"),
+      invoke<boolean>("check_input_monitoring"),
     ]);
     setAccessibility(a);
     setMicrophone(m);
+    setInputMonitoring(im);
     setCheckingPerms(false);
   }
 
@@ -293,7 +296,7 @@ export default function App() {
           <button className={`nav-item ${tab === "permissions" ? "active" : ""}`} onClick={() => setTab("permissions")}>
             <span className="nav-icon-wrap">
               <IconShield />
-              {(accessibility === false || microphone === false) && <span className="nav-badge" />}
+              {(accessibility === false || microphone === false || inputMonitoring === false) && <span className="nav-badge" />}
             </span>
             Permissions
           </button>
@@ -745,18 +748,36 @@ export default function App() {
               </div>
             </div>
 
-            {/* Input Monitoring card — informational */}
+            {/* Input Monitoring card */}
             <div className="section-group">
               <div className="section-label">Input Monitoring</div>
               <div className="permission-card">
                 <div className="permission-header">
                   <div className="permission-title-row">
                     <span className="permission-title">Input Monitoring</span>
-                    <span className="status-badge neutral">● Covered by Accessibility</span>
+                    <PermissionBadge granted={inputMonitoring} checking={checkingPerms} />
                   </div>
                   <p className="permission-desc">Monitors keyboard events globally to detect when your hotkey is pressed.</p>
                 </div>
-                <p className="permission-footer">Whisp uses a Session-level event tap — this only requires Accessibility, not a separate Input Monitoring permission.</p>
+                <div className="permission-actions">
+                  <button
+                    className="btn-secondary"
+                    disabled={inputMonitoring === true}
+                    onClick={async () => {
+                      await invoke("request_input_monitoring");
+                      setTimeout(() => refreshPermissions(), 1000);
+                    }}
+                  >
+                    Grant Access
+                  </button>
+                  <button className="btn-ghost" onClick={() => invoke("open_input_monitoring_settings")}>
+                    Open Settings ↗
+                  </button>
+                  <button className="btn-ghost" onClick={refreshPermissions} disabled={checkingPerms}>
+                    {checkingPerms ? "Checking…" : "Refresh"}
+                  </button>
+                </div>
+                <p className="permission-footer">Required — without Input Monitoring, macOS may silently disable the CGEventTap used to detect your hotkey.</p>
               </div>
             </div>
           </>

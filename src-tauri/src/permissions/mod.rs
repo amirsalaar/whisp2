@@ -17,7 +17,10 @@ pub fn open_accessibility_settings() {
 }
 
 /// Triggers the macOS microphone permission prompt if not yet decided.
-/// If already denied, opens System Settings → Privacy → Microphone instead.
+/// If already denied/restricted, opens System Settings → Privacy → Microphone instead.
+///
+/// AVAuthorizationStatus values:
+///   0 = NotDetermined, 1 = Restricted, 2 = Denied, 3 = Authorized
 pub fn request_microphone_access() {
     use block2::RcBlock;
     use objc2::msg_send;
@@ -34,23 +37,23 @@ pub fn request_microphone_access() {
         };
         let media_type = NSString::from_str("soun");
 
-        // Check current status first.
-        // 0 = NotDetermined, 1 = Authorized, 2 = Denied, 3 = Restricted
         let status: i64 = msg_send![cls, authorizationStatusForMediaType: &*media_type];
 
-        if status == 2 || status == 3 {
-            // Already denied/restricted — system won't show a prompt.
-            // Direct the user to System Settings.
-            open_microphone_settings();
-            return;
-        }
-
-        if status == 0 {
-            // Not determined — trigger the system prompt.
-            let block = RcBlock::new(|granted: Bool| {
-                tracing::info!("microphone access granted: {}", granted.as_bool());
-            });
-            let _: () = msg_send![cls, requestAccessForMediaType: &*media_type completionHandler: &*block];
+        match status {
+            3 => {
+                // Already authorized — nothing to do.
+            }
+            1 | 2 => {
+                // Restricted or Denied — system won't show a prompt; open Settings.
+                open_microphone_settings();
+            }
+            _ => {
+                // NotDetermined (0) — trigger the system prompt.
+                let block = RcBlock::new(|granted: Bool| {
+                    tracing::info!("microphone access granted: {}", granted.as_bool());
+                });
+                let _: () = msg_send![cls, requestAccessForMediaType: &*media_type completionHandler: &*block];
+            }
         }
     }
 }
@@ -61,8 +64,37 @@ pub fn open_microphone_settings() {
     let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
+/// Returns true if Input Monitoring permission is granted via CGPreflightListenEventAccess().
+/// Returns false for both NotDetermined and Denied — cannot distinguish between them.
+pub fn has_input_monitoring() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightListenEventAccess() -> bool;
+    }
+    unsafe { CGPreflightListenEventAccess() }
+}
+
+/// Triggers the macOS Input Monitoring permission prompt if not yet decided.
+/// Silently does nothing if already denied — open Settings instead.
+pub fn request_input_monitoring() {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGRequestListenEventAccess() -> bool;
+    }
+    let granted = unsafe { CGRequestListenEventAccess() };
+    tracing::info!("input monitoring request result: {}", granted);
+}
+
+/// Opens System Settings to the Input Monitoring privacy pane.
+pub fn open_input_monitoring_settings() {
+    let url = "x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent";
+    let _ = std::process::Command::new("open").arg(url).spawn();
+}
+
 /// Returns true if the app has been granted microphone permission.
 /// Uses AVCaptureDevice +authorizationStatusForMediaType: to check the real status.
+///
+/// AVAuthorizationStatus: 0=NotDetermined, 1=Restricted, 2=Denied, 3=Authorized
 pub fn has_microphone() -> bool {
     use objc2::msg_send;
     use objc2::runtime::AnyClass;
@@ -76,9 +108,8 @@ pub fn has_microphone() -> bool {
             Some(c) => c,
             None => return false,
         };
-        // AVMediaTypeAudio = "soun"
         let media_type = NSString::from_str("soun");
         let status: i64 = msg_send![cls, authorizationStatusForMediaType: &*media_type];
-        status == 1 // AVAuthorizationStatusAuthorized = 1
+        status == 3 // AVAuthorizationStatusAuthorized = 3
     }
 }
