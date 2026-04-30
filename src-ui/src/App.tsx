@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
 interface AppConfig {
-  provider: "open_a_i" | "groq" | "gemini";
+  provider: "open_a_i" | "groq" | "gemini" | "local_whisper";
   recording_mode: "press_and_hold" | "toggle";
   hotkey:
     | "left_option"
@@ -21,6 +22,7 @@ interface AppConfig {
   show_hud: boolean;
   language: string | null;
   max_history_entries: number | null;
+  local_whisper_model_path: string | null;
 }
 
 interface HistoryEntry {
@@ -126,6 +128,15 @@ export default function App() {
     }
   }
 
+  async function pickModel() {
+    const path = await openDialog({
+      filters: [{ name: "GGML Model", extensions: ["bin"] }],
+    });
+    if (path && config) {
+      setConfig({ ...config, local_whisper_model_path: path as string });
+    }
+  }
+
   async function clearHistory() {
     await invoke("clear_history");
     setHistory([]);
@@ -217,6 +228,7 @@ export default function App() {
                 <option value="open_a_i">OpenAI Whisper</option>
                 <option value="groq">Groq Whisper</option>
                 <option value="gemini">Gemini</option>
+                <option value="local_whisper">Local Whisper (on-device)</option>
               </select>
             </div>
 
@@ -374,6 +386,36 @@ export default function App() {
                     <option value="gemini-1.5-pro">gemini-1.5-pro</option>
                   </select>
                 </div>
+              </>
+            )}
+
+            {config.provider === "local_whisper" && (
+              <>
+                <div className="field">
+                  <label>Model File (.bin)</label>
+                  <div className="input-row">
+                    <input
+                      type="text"
+                      value={config.local_whisper_model_path ?? ""}
+                      placeholder="No model selected"
+                      readOnly
+                    />
+                    <button className="btn-secondary" onClick={pickModel}>
+                      Browse…
+                    </button>
+                  </div>
+                </div>
+                <p className="hint">
+                  Download a GGML model from{" "}
+                  <button
+                    className="link-btn"
+                    onClick={() => invoke("open_model_url")}
+                  >
+                    HuggingFace ggerganov/whisper.cpp ↗
+                  </button>
+                  . Recommended: <code>ggml-base.en.bin</code> (142 MB).
+                  Metal GPU acceleration is used automatically on Apple Silicon.
+                </p>
               </>
             )}
 

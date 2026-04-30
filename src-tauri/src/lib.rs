@@ -1,6 +1,6 @@
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex as TokioMutex};
 
 use crate::audio::capture;
 use crate::config::models::{AppConfig, RecordingMode};
@@ -27,6 +27,9 @@ pub struct AppState {
     /// Shared atomic holding the current CGEventTap device mask.
     /// Updating this at runtime changes the active hotkey without restarting.
     pub hotkey_mask: Arc<AtomicU64>,
+    /// Cached local Whisper context: (loaded_model_path, context).
+    /// Shared with manager::transcribe and commands::set_config.
+    pub whisper_ctx: crate::transcription::providers::local_whisper::WhisperCtxCache,
 }
 
 /// Spawns all background async tasks. Called once inside Tauri's `setup` hook.
@@ -143,6 +146,7 @@ pub fn spawn_tasks(
                         let text_tx = text_tx_audio.clone();
                         let state_tx = state_tx_audio.clone();
                         let app_id = source_app.take();
+                        let whisper_ctx = Arc::clone(&state_arc.whisper_ctx);
 
                         tokio::spawn(async move {
                             let samples = rx.recv().await;
@@ -150,7 +154,7 @@ pub fn spawn_tasks(
                                 Some(s) if !s.is_empty() => {
                                     match capture::encode_wav(&s) {
                                         Ok(wav) => {
-                                            match manager::transcribe(&config, wav).await {
+                                            match manager::transcribe(&config, wav, whisper_ctx).await {
                                                 Ok(text) => {
                                                     tracing::info!("transcribed: {}", text);
                                                     let text = crate::correction::dictionary::apply(text);

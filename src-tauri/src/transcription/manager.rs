@@ -3,11 +3,16 @@ use std::time::Duration;
 
 use crate::config::models::{AppConfig, TranscriptionProvider};
 use crate::keychain;
+use crate::transcription::providers::local_whisper::{LocalWhisperProvider, WhisperCtxCache};
 
 use super::providers::gemini::GeminiProvider;
 use super::providers::openai::OpenAIProvider;
 
-pub async fn transcribe(config: &AppConfig, wav_bytes: Vec<u8>) -> Result<String> {
+pub async fn transcribe(
+    config: &AppConfig,
+    wav_bytes: Vec<u8>,
+    whisper_ctx: WhisperCtxCache,
+) -> Result<String> {
     match &config.provider {
         TranscriptionProvider::OpenAI => {
             let api_key = keychain::get("openai_api_key")?
@@ -40,6 +45,21 @@ pub async fn transcribe(config: &AppConfig, wav_bytes: Vec<u8>) -> Result<String
             );
             transcribe_with_retry(|| provider.transcribe(wav_bytes.clone(), config.language.as_deref()))
                 .await
+        }
+        TranscriptionProvider::LocalWhisper => {
+            let model_path = config
+                .local_whisper_model_path
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!(
+                    "No model file selected. Choose a GGML .bin file in Settings → Local Whisper."
+                ))?
+                .clone();
+            let provider = LocalWhisperProvider {
+                model_path,
+                ctx_cache: whisper_ctx,
+                language: config.language.clone(),
+            };
+            provider.transcribe(wav_bytes).await
         }
     }
 }

@@ -336,3 +336,18 @@ body {
 .search-input:focus {
   border-color: var(--accent);
 }
+
+.hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin-top: 0.25rem;
+}
+
+.hint code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", "Fira Mono", monospace;
+}

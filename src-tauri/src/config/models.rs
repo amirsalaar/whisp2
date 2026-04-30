@@ -6,6 +6,7 @@ pub enum TranscriptionProvider {
     OpenAI,
     Groq,
     Gemini,
+    LocalWhisper,
 }
 
 impl Default for TranscriptionProvider {
@@ -59,6 +60,8 @@ pub struct AppConfig {
     pub language: Option<String>,
     /// Maximum number of history entries to keep. None = unlimited.
     pub max_history_entries: Option<usize>,
+    /// Path to a GGML `.bin` model file for local on-device transcription.
+    pub local_whisper_model_path: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -77,6 +80,7 @@ impl Default for AppConfig {
             show_hud: true,
             language: None,
             max_history_entries: Some(500),
+            local_whisper_model_path: None,
         }
     }
 }

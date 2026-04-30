@@ -15,9 +15,18 @@ pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
-    // Update the live hotkey mask so the CGEventTap picks up the change immediately.
+    // Update live hotkey mask so CGEventTap picks up changes immediately.
     let new_mask = device_mask_for_trigger(&config.hotkey);
     state.hotkey_mask.store(new_mask, Ordering::Relaxed);
+
+    // If the model path changed, invalidate the cached WhisperContext so it reloads.
+    {
+        let old_path = state.config.read().unwrap().local_whisper_model_path.clone();
+        if old_path != config.local_whisper_model_path {
+            let mut ctx = state.whisper_ctx.blocking_lock();
+            *ctx = (None, None);
+        }
+    }
 
     {
         let mut lock = state.config.write().unwrap();
@@ -39,4 +48,12 @@ pub fn set_api_key(key_name: String, value: String) -> Result<(), String> {
 #[tauri::command]
 pub fn delete_api_key(key_name: String) -> Result<(), String> {
     crate::keychain::delete(&key_name).map_err(|e| e.to_string())
+}
+
+/// Opens the HuggingFace whisper.cpp model page in the default browser.
+#[tauri::command]
+pub fn open_model_url() {
+    let _ = std::process::Command::new("open")
+        .arg("https://huggingface.co/ggerganov/whisper.cpp/tree/main")
+        .spawn();
 }

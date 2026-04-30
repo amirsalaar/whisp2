@@ -2,6 +2,7 @@
 
 use std::sync::{mpsc, Arc, RwLock};
 use std::sync::atomic::AtomicU64;
+use tokio::sync::Mutex as TokioMutex;
 
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
@@ -56,6 +57,7 @@ async fn main() {
         db: db.clone(),
         // Mask starts at 0; event_tap::install() sets the real value in setup.
         hotkey_mask: Arc::new(AtomicU64::new(0)),
+        whisper_ctx: Arc::new(TokioMutex::new((None, None))),
     };
 
     // Channel for CGEventTap → hotkey task
@@ -65,6 +67,7 @@ async fn main() {
     let state_arc = Arc::new(app_state.clone());
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .invoke_handler(tauri::generate_handler![
             get_config,
@@ -79,6 +82,7 @@ async fn main() {
             open_accessibility_settings,
             check_microphone,
             request_microphone,
+            open_model_url,
             get_dictionary,
             add_dictionary_entry,
             remove_dictionary_entry,
@@ -141,16 +145,21 @@ async fn main() {
             // Spawn all async background tasks
             spawn_tasks(app_handle, state_arc.clone(), hotkey_rx);
 
-            // Show settings on first launch if no API key is configured
+            // Show settings on first launch if no API key / model is configured
             {
                 use whisp_rs_lib::config::models::TranscriptionProvider;
-                let provider = state_arc.config.read().unwrap().provider.clone();
-                let key_name = match provider {
-                    TranscriptionProvider::OpenAI => "openai_api_key",
-                    TranscriptionProvider::Groq => "groq_api_key",
-                    TranscriptionProvider::Gemini => "gemini_api_key",
+                let config_snapshot = state_arc.config.read().unwrap().clone();
+                let needs_setup = match &config_snapshot.provider {
+                    TranscriptionProvider::OpenAI =>
+                        matches!(whisp_rs_lib::keychain::get("openai_api_key"), Ok(None)),
+                    TranscriptionProvider::Groq =>
+                        matches!(whisp_rs_lib::keychain::get("groq_api_key"), Ok(None)),
+                    TranscriptionProvider::Gemini =>
+                        matches!(whisp_rs_lib::keychain::get("gemini_api_key"), Ok(None)),
+                    TranscriptionProvider::LocalWhisper =>
+                        config_snapshot.local_whisper_model_path.is_none(),
                 };
-                if matches!(whisp_rs_lib::keychain::get(key_name), Ok(None)) {
+                if needs_setup {
                     if let Some(window) = app.get_webview_window("settings") {
                         let _ = window.show();
                         let _ = window.set_focus();
