@@ -78,17 +78,13 @@ fn apply_panel_flags(window: &tauri::WebviewWindow) {
         let _: () = msg_send![ns_window, setLevel: 25i64];
 
         // collectionBehavior: canJoinAllSpaces(1) | fullScreenAuxiliary(128) | stationary(16) | ignoresCycle(64)
-        let _: () = msg_send![ns_window, setCollectionBehavior: 1u64 | 128 | 16 | 64];
+        let _: () = msg_send![ns_window, setCollectionBehavior: 1u64 | 128u64 | 16u64 | 64u64];
 
         let _: () = msg_send![ns_window, setHidesOnDeactivate: false];
 
-        // Add NonactivatingPanel style mask (1 << 7 = 128)
-        let current_mask: u64 = msg_send![ns_window, styleMask];
-        let _: () = msg_send![ns_window, setStyleMask: current_mask | 128u64];
-
-        let _: () = msg_send![ns_window, setFloatingPanel: true];
         let _: () = msg_send![ns_window, setOpaque: false];
         let _: () = msg_send![ns_window, setHasShadow: false];
+        // Note: setFloatingPanel: removed — only valid on NSPanel subclass, not NSWindow
     }
 }
 
