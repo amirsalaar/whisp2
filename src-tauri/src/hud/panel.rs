@@ -89,11 +89,28 @@ fn apply_panel_flags(window: &tauri::WebviewWindow) {
 }
 
 fn bottom_center_position(mtm: MainThreadMarker) -> (f64, f64) {
-    let visible_frame = NSScreen::mainScreen(mtm)
+    let screen = NSScreen::mainScreen(mtm);
+    let visible_frame = screen
+        .as_ref()
         .map(|s| s.visibleFrame())
         .unwrap_or_else(|| NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1440.0, 900.0)));
+    // NSScreen uses AppKit coordinates: origin at bottom-left, y increases upward.
+    // Tauri's position() uses top-left origin: y increases downward.
+    //
+    // full_height = visibleFrame.minY (dock height) + visibleFrame.height + menu bar height
+    // We use NSScreen.frame for the true physical height of the screen.
+    let screen_height = screen
+        .as_ref()
+        .map(|s| s.frame().size.height)
+        .unwrap_or(visible_frame.origin.y + visible_frame.size.height);
+
+    // Horizontal: centered over visible width
     let x = visible_frame.origin.x + (visible_frame.size.width - 340.0) / 2.0;
-    let y = visible_frame.origin.y + 12.0;
+    // Vertical: bottom of our 88px window sits 12px above the visible area bottom edge (top of Dock)
+    // appkit_bottom = visibleFrame.minY + 12   (AppKit y of our window's bottom edge)
+    // tauri_y = screen_height - appkit_bottom - window_height
+    let appkit_bottom = visible_frame.origin.y + 12.0;
+    let y = screen_height - appkit_bottom - 88.0;
     (x, y)
 }
 
