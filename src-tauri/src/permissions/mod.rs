@@ -17,7 +17,7 @@ pub fn open_accessibility_settings() {
 }
 
 /// Triggers the macOS microphone permission prompt if not yet decided.
-/// The result is delivered asynchronously; check `has_microphone()` afterward.
+/// If already denied, opens System Settings → Privacy → Microphone instead.
 pub fn request_microphone_access() {
     use block2::RcBlock;
     use objc2::msg_send;
@@ -33,11 +33,32 @@ pub fn request_microphone_access() {
             None => return,
         };
         let media_type = NSString::from_str("soun");
-        let block = RcBlock::new(|granted: Bool| {
-            tracing::info!("microphone access granted: {}", granted.as_bool());
-        });
-        let _: () = msg_send![cls, requestAccessForMediaType: &*media_type completionHandler: &*block];
+
+        // Check current status first.
+        // 0 = NotDetermined, 1 = Authorized, 2 = Denied, 3 = Restricted
+        let status: i64 = msg_send![cls, authorizationStatusForMediaType: &*media_type];
+
+        if status == 2 || status == 3 {
+            // Already denied/restricted — system won't show a prompt.
+            // Direct the user to System Settings.
+            open_microphone_settings();
+            return;
+        }
+
+        if status == 0 {
+            // Not determined — trigger the system prompt.
+            let block = RcBlock::new(|granted: Bool| {
+                tracing::info!("microphone access granted: {}", granted.as_bool());
+            });
+            let _: () = msg_send![cls, requestAccessForMediaType: &*media_type completionHandler: &*block];
+        }
     }
+}
+
+/// Opens System Settings to the Microphone privacy pane.
+pub fn open_microphone_settings() {
+    let url = "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone";
+    let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
 /// Returns true if the app has been granted microphone permission.

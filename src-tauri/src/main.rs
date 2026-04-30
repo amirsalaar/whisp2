@@ -13,7 +13,7 @@ use tauri::{
 };
 
 use whisp_rs_lib::{
-    commands::{config::*, dictionary::*, history::*, permissions::*},
+    commands::{audio::*, config::*, dictionary::*, history::*, model_download::*, permissions::*},
     config::persistence,
     history::store,
     hotkey::{event_tap, mode::HotkeyEvent},
@@ -58,6 +58,7 @@ async fn main() {
         // Mask starts at 0; event_tap::install() sets the real value in setup.
         hotkey_mask: Arc::new(AtomicU64::new(0)),
         whisper_ctx: Arc::new(TokioMutex::new((None, None))),
+        download_abort: Arc::new(std::sync::atomic::AtomicBool::new(false)),
     };
 
     // Channel for CGEventTap → hotkey task
@@ -86,6 +87,12 @@ async fn main() {
             get_dictionary,
             add_dictionary_entry,
             remove_dictionary_entry,
+            list_whisper_models,
+            get_models_dir,
+            get_downloaded_models,
+            download_whisper_model,
+            abort_model_download,
+            list_audio_input_devices,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -98,7 +105,7 @@ async fn main() {
             TrayIconBuilder::with_id("main")
                 .icon(app.default_window_icon().cloned().unwrap())
                 .menu(&menu)
-                .tooltip("Whisp")
+                .tooltip("Whisp2")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "quit" => {
                         app.exit(0);

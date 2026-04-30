@@ -1,4 +1,4 @@
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, RwLock};
 use tokio::sync::{mpsc, Mutex as TokioMutex};
 
@@ -30,6 +30,8 @@ pub struct AppState {
     /// Cached local Whisper context: (loaded_model_path, context).
     /// Shared with manager::transcribe and commands::set_config.
     pub whisper_ctx: crate::transcription::providers::local_whisper::WhisperCtxCache,
+    /// Set to true to abort an in-progress model download.
+    pub download_abort: Arc<AtomicBool>,
 }
 
 /// Spawns all background async tasks. Called once inside Tauri's `setup` hook.
@@ -120,7 +122,8 @@ pub fn spawn_tasks(
             match cmd {
                 Some(RecordingCommand::Start(bundle_id)) => {
                     source_app = bundle_id;
-                    match capture::start_recording() {
+                    let input_device = state_arc.config.read().unwrap().input_device.clone();
+                    match capture::start_recording(input_device) {
                         Ok((tx, rx)) => {
                             stop_tx = Some(tx);
                             pcm_rx = Some(rx);

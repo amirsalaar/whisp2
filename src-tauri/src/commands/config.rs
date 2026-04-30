@@ -23,8 +23,9 @@ pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), S
     {
         let old_path = state.config.read().unwrap().local_whisper_model_path.clone();
         if old_path != config.local_whisper_model_path {
-            let mut ctx = state.whisper_ctx.blocking_lock();
-            *ctx = (None, None);
+            if let Ok(mut ctx) = state.whisper_ctx.try_lock() {
+                *ctx = (None, None);
+            }
         }
     }
 

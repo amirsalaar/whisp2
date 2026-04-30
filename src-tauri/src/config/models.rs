@@ -62,6 +62,8 @@ pub struct AppConfig {
     pub max_history_entries: Option<usize>,
     /// Path to a GGML `.bin` model file for local on-device transcription.
     pub local_whisper_model_path: Option<String>,
+    /// Name of the cpal input device to use. None = OS default.
+    pub input_device: Option<String>,
 }
 
 impl Default for AppConfig {
@@ -81,6 +83,7 @@ impl Default for AppConfig {
             language: None,
             max_history_entries: Some(500),
             local_whisper_model_path: None,
+            input_device: None,
         }
     }
 }
