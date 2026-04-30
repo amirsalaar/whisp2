@@ -36,6 +36,8 @@ pub enum HotkeyTrigger {
     LeftCommand,
     RightCommand,
     RightControl,
+    /// Globe / Fn key — CGEventFlags::maskSecondaryFn
+    Fn,
 }
 
 impl Default for HotkeyTrigger {

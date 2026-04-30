@@ -16,6 +16,8 @@ const NX_DEVICERCMDKEYMASK: u64 = 0x0000_0010;
 const NX_DEVICELALTKEYMASK: u64 = 0x0000_0020;
 const NX_DEVICERALTKEYMASK: u64 = 0x0000_0040;
 const NX_DEVICERCTLKEYMASK: u64 = 0x0000_2000;
+// CGEventFlags::maskSecondaryFn — set when the Fn/Globe key is held
+const NX_SECONDARYFNKEYMASK: u64 = 0x0080_0000;
 
 extern "C" {
     fn CGEventTapEnable(tap: CFMachPortRef, enable: bool);
@@ -28,6 +30,7 @@ pub fn device_mask_for_trigger(trigger: &HotkeyTrigger) -> u64 {
         HotkeyTrigger::LeftCommand => NX_DEVICELCMDKEYMASK,
         HotkeyTrigger::RightCommand => NX_DEVICERCMDKEYMASK,
         HotkeyTrigger::RightControl => NX_DEVICERCTLKEYMASK,
+        HotkeyTrigger::Fn => NX_SECONDARYFNKEYMASK,
     }
 }
 

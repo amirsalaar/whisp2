@@ -12,7 +12,8 @@ interface AppConfig {
     | "right_option"
     | "left_command"
     | "right_command"
-    | "right_control";
+    | "right_control"
+    | "fn";
   openai_api_url: string;
   openai_model: string;
   groq_api_url: string;
@@ -519,6 +520,7 @@ export default function App() {
                       <option value="right_option">Right ⌥</option>
                       <option value="left_command">Left ⌘</option>
                       <option value="right_control">Right ⌃</option>
+                      <option value="fn">Fn / Globe 🌐</option>
                     </select>
                   </div>
                 </div>
