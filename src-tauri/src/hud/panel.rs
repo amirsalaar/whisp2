@@ -115,10 +115,20 @@ fn bottom_center_position(mtm: MainThreadMarker) -> (f64, f64) {
 }
 
 pub fn update(app: &AppHandle, state: HudState) {
+    update_with_label(app, state, None);
+}
+
+/// Like `update`, but attaches an optional label to `expanded-idle` states.
+/// The JS receives `"expanded-idle:Click to allow microphone"` etc.
+pub fn update_with_label(app: &AppHandle, state: HudState, label: Option<&str>) {
+    let payload = match (&state, label) {
+        (HudState::ExpandedIdle, Some(lbl)) => format!("expanded-idle:{}", lbl),
+        _ => state.as_str().to_string(),
+    };
     let _ = app.emit_to(
         tauri::EventTarget::webview_window("hud"),
         "hud_state",
-        state.as_str(),
+        payload,
     );
     if let Some(window) = app.get_webview_window("hud") {
         let _ = window.set_ignore_cursor_events(!state.needs_mouse_events());

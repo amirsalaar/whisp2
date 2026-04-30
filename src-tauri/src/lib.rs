@@ -238,6 +238,9 @@ pub fn spawn_tasks(
     let state_hud = Arc::clone(&state);
     let state_tx_hud = state_tx.clone();
     rt.spawn(async move {
+        // Emit initial collapsed-idle so the pill appears immediately at launch.
+        hud::panel::update(&ah_hud, hud::panel::HudState::CollapsedIdle);
+
         loop {
             match state_rx.recv().await {
                 Some(s) => {
@@ -270,7 +273,19 @@ pub fn spawn_tasks(
                                     RecordingState::Error(_) => unreachable!(),
                                 }
                             };
-                            hud::panel::update(&ah_hud, hud_state);
+                            // When expanding to idle, show contextual label:
+                            // microphone not granted → prompt to allow; otherwise → hotkey hint.
+                            if hud_state == hud::panel::HudState::ExpandedIdle {
+                                let mic_ok = permissions::has_microphone();
+                                let label = if mic_ok {
+                                    "Click or hold fn to start dictating"
+                                } else {
+                                    "Click to allow microphone"
+                                };
+                                hud::panel::update_with_label(&ah_hud, hud_state, Some(label));
+                            } else {
+                                hud::panel::update(&ah_hud, hud_state);
+                            }
                         }
                     }
                     update_tray_icon(&ah_hud, &s);
