@@ -52,7 +52,7 @@ pub fn request_microphone_access() {
                 let block = RcBlock::new(|granted: Bool| {
                     tracing::info!("microphone access granted: {}", granted.as_bool());
                 });
-                let _: () = msg_send![cls, requestAccessForMediaType: &*media_type completionHandler: &*block];
+                let _: () = msg_send![cls, requestAccessForMediaType: &*media_type, completionHandler: &*block];
             }
         }
     }

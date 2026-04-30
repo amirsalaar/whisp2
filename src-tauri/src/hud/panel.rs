@@ -52,8 +52,15 @@ pub fn create(app: &AppHandle) {
         .shadow(false)
         .skip_taskbar(true)
         .focused(false)
-        .build()
-        .expect("failed to create HUD window");
+        .build();
+
+    let window = match window {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::error!("HUD window creation failed (app will run without HUD): {}", e);
+            return;
+        }
+    };
 
     apply_panel_flags(&window);
 }
