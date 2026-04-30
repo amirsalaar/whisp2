@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
@@ -23,6 +24,7 @@ interface AppConfig {
   language: string | null;
   max_history_entries: number | null;
   local_whisper_model_path: string | null;
+  input_device: string | null;
 }
 
 interface HistoryEntry {
@@ -38,6 +40,19 @@ interface HistoryEntry {
 interface DictEntry {
   from: string;
   to: string;
+}
+
+interface ModelInfo {
+  name: string;
+  filename: string;
+  size_mb: number;
+  description: string;
+}
+
+interface DownloadProgress {
+  model_name: string;
+  downloaded: number;
+  total: number;
 }
 
 type Tab = "settings" | "history" | "dictionary";
@@ -61,6 +76,11 @@ export default function App() {
   const [dictEntries, setDictEntries] = useState<DictEntry[]>([]);
   const [dictFrom, setDictFrom] = useState("");
   const [dictTo, setDictTo] = useState("");
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+  const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
+  const [inputDevices, setInputDevices] = useState<string[]>([]);
 
   useEffect(() => {
     invoke<AppConfig>("get_config").then(setConfig);
@@ -75,6 +95,19 @@ export default function App() {
     invoke<string | null>("get_api_key", { keyName: "gemini_api_key" }).then(
       (k) => k && setGeminiKey("••••••••")
     );
+    invoke<ModelInfo[]>("list_whisper_models").then(setModels);
+    invoke<string[]>("get_downloaded_models").then(setDownloadedModels);
+    invoke<string[]>("list_audio_input_devices").then(setInputDevices);
+
+    let unlisten: (() => void) | undefined;
+    listen<DownloadProgress>("model_download_progress", (e) => {
+      setDownloadProgress(e.payload);
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -137,6 +170,40 @@ export default function App() {
     }
   }
 
+  async function downloadModel(name: string) {
+    if (!config) return;
+    setDownloadingModel(name);
+    setDownloadProgress(null);
+    try {
+      const path = await invoke<string>("download_whisper_model", { modelName: name });
+      setDownloadedModels((prev) => [...prev, name]);
+      const updated = { ...config, local_whisper_model_path: path };
+      setConfig(updated);
+      await invoke("set_config", { config: updated });
+    } catch (e) {
+      if (String(e) !== "Download aborted") {
+        setStatusMsg(`Download failed: ${e}`);
+        setTimeout(() => setStatusMsg(""), 4000);
+      }
+    } finally {
+      setDownloadingModel(null);
+      setDownloadProgress(null);
+    }
+  }
+
+  async function abortDownload() {
+    await invoke("abort_model_download");
+  }
+
+  async function selectDownloadedModel(m: ModelInfo) {
+    if (!config) return;
+    const dir = await invoke<string>("get_models_dir");
+    const path = `${dir}/${m.filename}`;
+    const updated = { ...config, local_whisper_model_path: path };
+    setConfig(updated);
+    await invoke("set_config", { config: updated });
+  }
+
   async function clearHistory() {
     await invoke("clear_history");
     setHistory([]);
@@ -162,7 +229,7 @@ export default function App() {
       <nav className="sidebar">
         <div className="brand">
           <span className="brand-icon">🎙</span>
-          <span className="brand-name">Whisp</span>
+          <span className="brand-name">Whisp2</span>
         </div>
         <button
           className={`nav-item ${tab === "settings" ? "active" : ""}`}
@@ -390,33 +457,65 @@ export default function App() {
             )}
 
             {config.provider === "local_whisper" && (
-              <>
-                <div className="field">
-                  <label>Model File (.bin)</label>
-                  <div className="input-row">
-                    <input
-                      type="text"
-                      value={config.local_whisper_model_path ?? ""}
-                      placeholder="No model selected"
-                      readOnly
-                    />
-                    <button className="btn-secondary" onClick={pickModel}>
-                      Browse…
-                    </button>
-                  </div>
+              <div className="field">
+                <label>Model</label>
+                <div className="model-catalog">
+                  {models.map((m) => {
+                    const isDownloaded = downloadedModels.includes(m.name);
+                    const isActive = !!config.local_whisper_model_path?.includes(m.filename);
+                    const isDownloading = downloadingModel === m.name;
+                    const progress = isDownloading ? downloadProgress : null;
+                    const pct = progress && progress.total > 0
+                      ? Math.round((progress.downloaded / progress.total) * 100)
+                      : 0;
+
+                    return (
+                      <div key={m.name} className={`model-row${isActive ? " active" : ""}`}>
+                        <div className="model-info">
+                          <span className="model-name">{m.name}</span>
+                          <span className="model-meta">{m.description} · {m.size_mb} MB</span>
+                        </div>
+                        <div className="model-action">
+                          {isActive && <span className="badge-active">Active</span>}
+                          {isDownloaded && !isActive && (
+                            <button className="btn-secondary" onClick={() => selectDownloadedModel(m)}>
+                              Use
+                            </button>
+                          )}
+                          {!isDownloaded && !isDownloading && (
+                            <button className="btn-secondary" onClick={() => downloadModel(m.name)}>
+                              Download
+                            </button>
+                          )}
+                          {isDownloading && (
+                            <div className="download-progress">
+                              <div className="progress-bar">
+                                <div className="progress-fill" style={{ width: `${pct}%` }} />
+                              </div>
+                              <span className="progress-pct">{pct}%</span>
+                              <button className="btn-ghost" onClick={abortDownload} title="Abort">
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <p className="hint">
-                  Download a GGML model from{" "}
-                  <button
-                    className="link-btn"
-                    onClick={() => invoke("open_model_url")}
-                  >
-                    HuggingFace ggerganov/whisper.cpp ↗
+                <div className="model-custom">
+                  <span className="hint">Custom file:</span>
+                  <input
+                    type="text"
+                    value={config.local_whisper_model_path ?? ""}
+                    placeholder="No model selected"
+                    readOnly
+                  />
+                  <button className="btn-secondary" onClick={pickModel}>
+                    Browse…
                   </button>
-                  . Recommended: <code>ggml-base.en.bin</code> (142 MB).
-                  Metal GPU acceleration is used automatically on Apple Silicon.
-                </p>
-              </>
+                </div>
+              </div>
             )}
 
             <div className="field">
@@ -465,6 +564,21 @@ export default function App() {
               >
                 <option value="press_and_hold">Press and Hold</option>
                 <option value="toggle">Toggle</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label>Microphone</label>
+              <select
+                value={config.input_device ?? ""}
+                onChange={(e) =>
+                  setConfig({ ...config, input_device: e.target.value || null })
+                }
+              >
+                <option value="">System Default</option>
+                {inputDevices.map((d) => (
+                  <option key={d} value={d}>{d}</option>
+                ))}
               </select>
             </div>
 
