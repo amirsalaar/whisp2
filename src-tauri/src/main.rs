@@ -16,7 +16,7 @@ use whisp_rs_lib::{
     commands::{audio::*, config::*, dictionary::*, history::*, hud::*, model_download::*, permissions::*},
     config::persistence,
     history::store,
-    hotkey::{event_tap, mode::HotkeyEvent},
+    hotkey::{event_tap, mode::{HotkeyEvent, RecordingCommand}},
     hud::panel,
     permissions,
     spawn_tasks, AppState,
@@ -52,6 +52,9 @@ async fn main() {
         .await
         .expect("failed to create history schema");
 
+    // Recording command channel — cmd_tx stored in AppState so HUD commands can use it
+    let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<RecordingCommand>(8);
+
     let app_state = AppState {
         config: Arc::new(RwLock::new(config)),
         db: db.clone(),
@@ -59,6 +62,7 @@ async fn main() {
         hotkey_mask: Arc::new(AtomicU64::new(0)),
         whisper_ctx: Arc::new(TokioMutex::new((None, None))),
         download_abort: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        recording_cmd_tx: cmd_tx,
     };
 
     // Channel for CGEventTap → hotkey task
@@ -165,7 +169,7 @@ async fn main() {
             }
 
             // Spawn all async background tasks
-            spawn_tasks(app_handle, state_arc.clone(), hotkey_rx);
+            spawn_tasks(app_handle, state_arc.clone(), hotkey_rx, cmd_rx);
 
             // Show settings on first launch if no API key / model is configured
             {

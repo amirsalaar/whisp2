@@ -95,6 +95,9 @@ function renderCollapsedIdle(root: HTMLElement): void {
   const bar = document.createElement('div');
   bar.className = 'collapsed-handle';
   wrap.appendChild(bar);
+  // Client-side fallback: clicking the collapsed handle expands immediately
+  // without waiting for the Rust proximity monitor to fire.
+  wrap.addEventListener('click', () => setState('expanded-idle'));
   root.appendChild(wrap);
 }
 
@@ -221,6 +224,17 @@ async function init(): Promise<void> {
 
   requestAnimationFrame(tickWaveform);
 
+  // Expand/collapse on cursor enter/leave the HUD window.
+  // The global NSEvent monitor in Rust goes silent when the cursor is inside our
+  // own window, so we use browser mouseenter/mouseleave on <html> as the
+  // reliable trigger. The window already has setIgnoresMouseEvents:NO so these fire.
+  document.documentElement.addEventListener('mouseenter', () => {
+    if (currentState === 'collapsed-idle') setState('expanded-idle');
+  });
+  document.documentElement.addEventListener('mouseleave', () => {
+    if (currentState === 'expanded-idle') setState('collapsed-idle');
+  });
+
   await listen<string>('hud_state', (event) => {
     const raw = event.payload;
     // Support "expanded-idle:Click to allow microphone" payload format
@@ -239,14 +253,6 @@ async function init(): Promise<void> {
     currentLevel = Math.min(Math.max(event.payload, 0), 1);
   });
 
-  // Proximity: collapsed ↔ expanded toggle on hover near Dock
-  await listen<boolean>('hud_proximity', (event) => {
-    if (currentState === 'collapsed-idle' && event.payload) {
-      setState('expanded-idle');
-    } else if (currentState === 'expanded-idle' && !event.payload) {
-      setState('collapsed-idle');
-    }
-  });
 }
 
 init().catch(console.error);

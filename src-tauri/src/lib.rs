@@ -1,6 +1,6 @@
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, RwLock};
-use tokio::sync::{mpsc, Mutex as TokioMutex};
+use tokio::sync::mpsc;
 
 use crate::audio::capture;
 use crate::config::models::{AppConfig, RecordingMode};
@@ -32,6 +32,8 @@ pub struct AppState {
     pub whisper_ctx: crate::transcription::providers::local_whisper::WhisperCtxCache,
     /// Set to true to abort an in-progress model download.
     pub download_abort: Arc<AtomicBool>,
+    /// Channel for HUD buttons (cancel/stop) to send commands into the audio pipeline.
+    pub recording_cmd_tx: mpsc::Sender<RecordingCommand>,
 }
 
 /// Spawns all background async tasks. Called once inside Tauri's `setup` hook.
@@ -39,12 +41,14 @@ pub fn spawn_tasks(
     app_handle: tauri::AppHandle,
     state: Arc<AppState>,
     hotkey_rx: std::sync::mpsc::Receiver<HotkeyEvent>,
+    cmd_rx: mpsc::Receiver<RecordingCommand>,
 ) {
     let rt = tokio::runtime::Handle::current();
 
-    // Channels
-    let (cmd_tx, mut cmd_rx) = mpsc::channel::<RecordingCommand>(8);
+    // Channels — cmd_tx/rx created in main.rs and passed in so AppState can hold cmd_tx
+    let mut cmd_rx = cmd_rx;
     let (state_tx, mut state_rx) = mpsc::channel::<RecordingState>(8);
+    let (proximity_tx, mut proximity_rx) = mpsc::channel::<bool>(4);
     // (text, source_app) — source_app used for app-aware injection delay
     let (text_tx, mut text_rx) = mpsc::channel::<(String, Option<String>)>(8);
     // Reset channel: audio/transcription tasks notify hotkey_task when processing is done
@@ -65,7 +69,7 @@ pub fn spawn_tasks(
     // --- hotkey_task ---
     // Listens for both CGEventTap events (via async_hk_rx) AND reset signals
     // (via reset_rx) so it can return to Idle after each transcription cycle.
-    let cmd_tx_hk = cmd_tx.clone();
+    let cmd_tx_hk = state.recording_cmd_tx.clone();
     let state_tx_hk = state_tx.clone();
     let state_hk = Arc::clone(&state);
     rt.spawn(async move {
@@ -233,6 +237,9 @@ pub fn spawn_tasks(
         }
     });
 
+    // Start global mouse-moved monitor for proximity-based pill expand/collapse
+    hud::panel::start_proximity_monitor(app_handle.clone(), proximity_tx);
+
     // --- hud_task ---
     let ah_hud = app_handle.clone();
     let state_hud = Arc::clone(&state);
@@ -242,8 +249,12 @@ pub fn spawn_tasks(
         hud::panel::update(&ah_hud, hud::panel::HudState::CollapsedIdle);
 
         loop {
-            match state_rx.recv().await {
-                Some(s) => {
+            tokio::select! {
+                maybe_s = state_rx.recv() => {
+                    let s = match maybe_s {
+                        Some(s) => s,
+                        None => break,
+                    };
                     let show_hud = state_hud.config.read().unwrap().show_hud;
                     let mode = state_hud.config.read().unwrap().recording_mode.clone();
                     match &s {
@@ -273,24 +284,17 @@ pub fn spawn_tasks(
                                     RecordingState::Error(_) => unreachable!(),
                                 }
                             };
-                            // When expanding to idle, show contextual label:
-                            // microphone not granted → prompt to allow; otherwise → hotkey hint.
-                            if hud_state == hud::panel::HudState::ExpandedIdle {
-                                let mic_ok = permissions::has_microphone();
-                                let label = if mic_ok {
-                                    "Click or hold fn to start dictating"
-                                } else {
-                                    "Click to allow microphone"
-                                };
-                                hud::panel::update_with_label(&ah_hud, hud_state, Some(label));
-                            } else {
-                                hud::panel::update(&ah_hud, hud_state);
-                            }
+                            hud::panel::update(&ah_hud, hud_state);
                         }
                     }
                     update_tray_icon(&ah_hud, &s);
                 }
-                None => break,
+                maybe_near = proximity_rx.recv() => {
+                    // Drain proximity events — expand/collapse is owned by JS
+                    // mouseenter/mouseleave. Global NSEvent monitors don't fire
+                    // when the cursor is inside our own window.
+                    if maybe_near.is_none() { break; }
+                }
             }
         }
     });

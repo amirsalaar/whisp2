@@ -6,9 +6,10 @@
 use objc2::runtime::AnyObject;
 use objc2::msg_send;
 use objc2_app_kit::NSScreen;
-use objc2_foundation::{MainThreadMarker, NSRect, NSPoint, NSSize};
+use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
+use tokio::sync::mpsc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HudState {
@@ -33,7 +34,7 @@ impl HudState {
     }
 
     fn needs_mouse_events(&self) -> bool {
-        matches!(self, Self::RecordingControls)
+        matches!(self, Self::CollapsedIdle | Self::ExpandedIdle | Self::RecordingControls)
     }
 }
 
@@ -63,6 +64,55 @@ pub fn create(app: &AppHandle) {
     };
 
     apply_panel_flags(&window);
+    // Enable mouse events immediately at creation — don't rely on the async hud_task update.
+    let _ = window.set_ignore_cursor_events(false);
+}
+
+/// Install a global NSEvent mouse-moved monitor that emits proximity signals
+/// via `proximity_tx`. The monitor fires on every mouse-moved event; the
+/// receiver should debounce by comparing against its last known state.
+///
+/// Uses `NSEventMaskMouseMoved` (mask = 1 << 5 = 32). This does NOT require
+/// Accessibility permission — global monitors for mouse-moved are allowed.
+pub fn start_proximity_monitor(app: AppHandle, proximity_tx: mpsc::Sender<bool>) {
+    let _ = app.run_on_main_thread(move || {
+        unsafe {
+            let mtm = MainThreadMarker::new_unchecked();
+            // Threshold: cursor within 88px above visible area bottom = pill height
+            let threshold = NSScreen::mainScreen(mtm)
+                .map(|s| s.visibleFrame().origin.y + 88.0)
+                .unwrap_or(88.0);
+
+            // NSEventMaskMouseMoved = 1 << 5
+            let mask: u64 = 1 << 5;
+
+            let block = block2::RcBlock::new(move |_event: *mut AnyObject| {
+                let ns_event_cls = objc2::runtime::AnyClass::get(c"NSEvent").unwrap();
+                let loc: NSPoint = msg_send![ns_event_cls, mouseLocation];
+                let near = loc.y < threshold;
+                // try_send: drop the event if the channel is full rather than
+                // blocking the main thread (mouse-moved fires hundreds of times/sec)
+                let _ = proximity_tx.try_send(near);
+            });
+
+            let ns_event_cls = objc2::runtime::AnyClass::get(c"NSEvent").unwrap();
+            let monitor: *mut AnyObject = msg_send![
+                ns_event_cls,
+                addGlobalMonitorForEventsMatchingMask: mask,
+                handler: &*block
+            ];
+
+            // Keep block and monitor alive for process lifetime
+            std::mem::forget(block);
+            if monitor.is_null() {
+                tracing::error!("NSEvent global mouse monitor failed to install — proximity expand/collapse disabled. Check Screen Recording permission.");
+                return;
+            }
+            // Box the raw pointer so it has a non-Copy owner; then forget that.
+            let boxed = Box::from_raw(monitor);
+            std::mem::forget(boxed);
+        }
+    });
 }
 
 fn apply_panel_flags(window: &tauri::WebviewWindow) {

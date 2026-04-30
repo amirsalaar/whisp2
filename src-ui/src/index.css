@@ -1,3 +1,3 @@
 /* Reset — App.css owns all styles */
-body { margin: 0; }
-#root { width: 100%; height: 100vh; }
+html, body { margin: 0; height: 100%; overflow: hidden; }
+#root { width: 100%; height: 100%; }
