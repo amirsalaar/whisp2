@@ -6012,6 +6012,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-core-foundation",
  "objc2-foundation",
+ "raw-window-handle",
  "reqwest 0.12.28",
  "rubato",
  "security-framework",
