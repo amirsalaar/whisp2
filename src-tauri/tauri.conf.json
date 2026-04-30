@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Whisp",
-  "identifier": "com.whisp.whisp-rs",
+  "productName": "Whisp2",
+  "identifier": "com.whisp.app",
   "version": "0.1.0",
   "app": {
     "windows": [
       {
         "label": "settings",
-        "title": "Whisp Settings",
+        "title": "Whisp2 Settings",
         "width": 680,
         "height": 560,
         "visible": false,
@@ -29,7 +29,12 @@
     "active": true,
     "targets": "all",
     "icon": [
-      "icons/icon.png"
+      "icons/icon.icns",
+      "icons/icon.png",
+      "icons/icon_32x32.png",
+      "icons/icon_128x128.png",
+      "icons/icon_256x256.png",
+      "icons/icon_512x512.png"
     ],
     "category": "Utility",
     "macOS": {
