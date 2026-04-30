@@ -83,6 +83,7 @@ async fn main() {
             open_accessibility_settings,
             check_microphone,
             request_microphone,
+            open_microphone_settings,
             open_model_url,
             get_dictionary,
             add_dictionary_entry,

@@ -19,3 +19,8 @@ pub fn check_microphone() -> bool {
 pub fn request_microphone() {
     permissions::request_microphone_access();
 }
+
+#[tauri::command]
+pub fn open_microphone_settings() {
+    permissions::open_microphone_settings();
+}

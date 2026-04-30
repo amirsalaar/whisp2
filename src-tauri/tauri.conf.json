@@ -8,8 +8,10 @@
       {
         "label": "settings",
         "title": "Whisp2 Settings",
-        "width": 680,
-        "height": 560,
+        "width": 820,
+        "height": 660,
+        "minWidth": 720,
+        "minHeight": 560,
         "visible": false,
         "resizable": true,
         "center": true

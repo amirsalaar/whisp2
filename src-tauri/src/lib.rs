@@ -47,6 +47,9 @@ pub fn spawn_tasks(
     let (state_tx, mut state_rx) = mpsc::channel::<RecordingState>(8);
     // (text, source_app) — source_app used for app-aware injection delay
     let (text_tx, mut text_rx) = mpsc::channel::<(String, Option<String>)>(8);
+    // Reset channel: audio/transcription tasks notify hotkey_task when processing is done
+    // so it can return to Idle and accept the next hotkey press.
+    let (reset_tx, mut reset_rx) = mpsc::channel::<()>(8);
 
     // Bridge the std::sync::mpsc receiver (from CGEventTap callback) into
     // a tokio channel so the hotkey_task can await events without blocking.
@@ -60,6 +63,8 @@ pub fn spawn_tasks(
     });
 
     // --- hotkey_task ---
+    // Listens for both CGEventTap events (via async_hk_rx) AND reset signals
+    // (via reset_rx) so it can return to Idle after each transcription cycle.
     let cmd_tx_hk = cmd_tx.clone();
     let state_tx_hk = state_tx.clone();
     let state_hk = Arc::clone(&state);
@@ -67,37 +72,45 @@ pub fn spawn_tasks(
         let mut current = RecordingState::Idle;
 
         loop {
-            let event = match async_hk_rx.recv().await {
-                Some(e) => e,
-                None => break,
-            };
-
-            let mode = state_hk.config.read().unwrap().recording_mode.clone();
-
-            let new_state = match (&current, &event) {
-                (RecordingState::Idle, HotkeyEvent::KeyDown(bundle_id)) => {
-                    let _ = cmd_tx_hk.send(RecordingCommand::Start(bundle_id.clone())).await;
-                    RecordingState::Recording
-                }
-                (RecordingState::Recording, HotkeyEvent::KeyUp) => {
-                    match mode {
-                        RecordingMode::PressAndHold => {
-                            let _ = cmd_tx_hk.send(RecordingCommand::Stop).await;
-                            RecordingState::Processing
+            let new_state = tokio::select! {
+                // Hotkey event from CGEventTap
+                maybe_event = async_hk_rx.recv() => {
+                    let event = match maybe_event {
+                        Some(e) => e,
+                        None => break,
+                    };
+                    let mode = state_hk.config.read().unwrap().recording_mode.clone();
+                    match (&current, &event) {
+                        (RecordingState::Idle, HotkeyEvent::KeyDown(bundle_id)) => {
+                            let _ = cmd_tx_hk.send(RecordingCommand::Start(bundle_id.clone())).await;
+                            RecordingState::Recording
                         }
-                        RecordingMode::Toggle => current.clone(), // KeyUp ignored in toggle mode
+                        (RecordingState::Recording, HotkeyEvent::KeyUp) => {
+                            match mode {
+                                RecordingMode::PressAndHold => {
+                                    let _ = cmd_tx_hk.send(RecordingCommand::Stop).await;
+                                    RecordingState::Processing
+                                }
+                                RecordingMode::Toggle => current.clone(),
+                            }
+                        }
+                        (RecordingState::Recording, HotkeyEvent::KeyDown(_)) => {
+                            match mode {
+                                RecordingMode::Toggle => {
+                                    let _ = cmd_tx_hk.send(RecordingCommand::Stop).await;
+                                    RecordingState::Processing
+                                }
+                                RecordingMode::PressAndHold => current.clone(),
+                            }
+                        }
+                        _ => current.clone(),
                     }
                 }
-                (RecordingState::Recording, HotkeyEvent::KeyDown(_)) => {
-                    match mode {
-                        RecordingMode::Toggle => {
-                            let _ = cmd_tx_hk.send(RecordingCommand::Stop).await;
-                            RecordingState::Processing
-                        }
-                        RecordingMode::PressAndHold => current.clone(),
-                    }
+                // Reset signal from audio/transcription — return to Idle
+                maybe_reset = reset_rx.recv() => {
+                    if maybe_reset.is_none() { break; }
+                    RecordingState::Idle
                 }
-                _ => current.clone(),
             };
 
             if new_state != current {
@@ -110,6 +123,7 @@ pub fn spawn_tasks(
     // --- audio_task ---
     let state_tx_audio = state_tx.clone();
     let text_tx_audio = text_tx.clone();
+    let reset_tx_audio = reset_tx.clone();
     let state_arc = Arc::clone(&state);
     rt.spawn(async move {
         let mut stop_tx: Option<mpsc::Sender<()>> = None;
@@ -133,6 +147,7 @@ pub fn spawn_tasks(
                         Err(e) => {
                             tracing::error!("failed to start recording: {}", e);
                             let _ = state_tx_audio.send(RecordingState::Idle).await;
+                            let _ = reset_tx_audio.send(()).await;
                         }
                     }
                 }
@@ -148,6 +163,7 @@ pub fn spawn_tasks(
                         let db = state_arc.db.clone();
                         let text_tx = text_tx_audio.clone();
                         let state_tx = state_tx_audio.clone();
+                        let reset_tx = reset_tx_audio.clone();
                         let app_id = source_app.take();
                         let whisper_ctx = Arc::clone(&state_arc.whisper_ctx);
 
@@ -161,7 +177,6 @@ pub fn spawn_tasks(
                                                 Ok(text) => {
                                                     tracing::info!("transcribed: {}", text);
                                                     let text = crate::correction::dictionary::apply(text);
-                                                    // Save to history with captured source app
                                                     if config.save_history {
                                                         let provider_name = format!("{:?}", config.provider);
                                                         if let Err(e) = crate::history::store::insert(
@@ -169,9 +184,7 @@ pub fn spawn_tasks(
                                                             &text,
                                                             app_id.as_deref(),
                                                             &provider_name,
-                                                        )
-                                                        .await
-                                                        {
+                                                        ).await {
                                                             tracing::warn!("history insert failed: {}", e);
                                                         } else if let Some(max) = config.max_history_entries {
                                                             if let Err(e) = crate::history::store::prune(&db, max).await {
@@ -181,22 +194,29 @@ pub fn spawn_tasks(
                                                     }
                                                     let _ = text_tx.send((text, app_id)).await;
                                                     let _ = state_tx.send(RecordingState::Idle).await;
+                                                    // Reset hotkey_task state machine → Idle
+                                                    let _ = reset_tx.send(()).await;
                                                 }
                                                 Err(e) => {
                                                     tracing::error!("transcription failed: {}", e);
                                                     let _ = state_tx.send(RecordingState::Error(e.to_string())).await;
+                                                    // Error state auto-resets after 2s via hud_task;
+                                                    // reset hotkey_task immediately so next press works.
+                                                    let _ = reset_tx.send(()).await;
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             tracing::error!("WAV encode failed: {}", e);
                                             let _ = state_tx.send(RecordingState::Error(e.to_string())).await;
+                                            let _ = reset_tx.send(()).await;
                                         }
                                     }
                                 }
                                 _ => {
                                     tracing::warn!("no audio captured");
                                     let _ = state_tx.send(RecordingState::Idle).await;
+                                    let _ = reset_tx.send(()).await;
                                 }
                             }
                         });
@@ -206,6 +226,8 @@ pub fn spawn_tasks(
                     stop_tx.take();
                     pcm_rx.take();
                     source_app.take();
+                    // Also reset hotkey_task if a cancel comes through
+                    let _ = reset_tx_audio.send(()).await;
                 }
             }
         }
@@ -221,37 +243,31 @@ pub fn spawn_tasks(
                 Some(s) => {
                     let show_hud = state_hud.config.read().unwrap().show_hud;
                     match &s {
-                        RecordingState::Error(msg) => {
-                            // Show error in HUD for 2s then auto-dismiss to Idle.
-                            let label = format!("Error: {}", msg);
-                            if show_hud {
-                                let _ = ah_hud.run_on_main_thread({
-                                    let label = label.clone();
-                                    move || hud::panel::show(&label)
-                                });
-                            }
+                        RecordingState::Error(_msg) => {
+                            // Hide HUD immediately on error (tray tooltip shows the message)
+                            let _ = ah_hud.run_on_main_thread(|| hud::panel::update(hud::panel::HudState::Hidden));
                             let state_tx = state_tx_hud.clone();
                             let ah = ah_hud.clone();
                             tokio::spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                                 let _ = state_tx.send(RecordingState::Idle).await;
-                                let _ = ah.run_on_main_thread(|| hud::panel::hide());
+                                let _ = ah.run_on_main_thread(|| hud::panel::update(hud::panel::HudState::Hidden));
                             });
                         }
                         other => {
-                            let label = match other {
-                                RecordingState::Idle => "".to_string(),
-                                RecordingState::Recording => "Recording...".to_string(),
-                                RecordingState::Processing => "Processing...".to_string(),
+                            let hud_state = match other {
+                                RecordingState::Idle => hud::panel::HudState::Hidden,
+                                RecordingState::Recording => hud::panel::HudState::Recording,
+                                RecordingState::Processing => hud::panel::HudState::Processing,
                                 RecordingState::Error(_) => unreachable!(),
                             };
-                            let _ = ah_hud.run_on_main_thread(move || {
-                                if label.is_empty() {
-                                    hud::panel::hide();
-                                } else if show_hud {
-                                    hud::panel::show(&label);
-                                }
-                            });
+                            // Always hide; only show Recording/Processing when show_hud is on.
+                            let is_visible = matches!(hud_state, hud::panel::HudState::Recording | hud::panel::HudState::Processing);
+                            if !is_visible || show_hud {
+                                let _ = ah_hud.run_on_main_thread(move || {
+                                    hud::panel::update(hud_state);
+                                });
+                            }
                         }
                     }
                     update_tray_icon(&ah_hud, &s);

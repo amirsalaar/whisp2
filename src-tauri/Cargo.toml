@@ -93,6 +93,11 @@ objc2-app-kit = { version = "0.3", features = [
   "NSRunningApplication",
   "NSGraphics",
   "NSResponder",
+  "NSScreen",
+  "NSTextField",
+  "NSFont",
+  "NSText",
+  "NSVisualEffectView",
 ] }
 
 # UUID for record IDs
