@@ -1,0 +1,162 @@
+:root {
+  --pill-bg: rgba(0, 0, 0, 0.84);
+  --pill-bg-collapsed: rgba(255, 255, 255, 0.12);
+  --pill-border: rgba(255, 255, 255, 0.16);
+  --text-primary: rgba(255, 255, 255, 0.96);
+  --text-muted: rgba(255, 255, 255, 0.62);
+  --amber: rgb(230, 174, 61);
+  --danger: rgb(224, 89, 71);
+}
+
+.hud-pill {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  border-radius: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition:
+    width 0.24s cubic-bezier(0.34, 1.56, 0.64, 1.0),
+    height 0.24s cubic-bezier(0.34, 1.56, 0.64, 1.0),
+    background-color 0.18s ease-in-out,
+    opacity 0.18s ease-in-out,
+    border-color 0.18s ease-in-out;
+  border: 1px solid transparent;
+}
+
+.hud-pill.collapsed-idle {
+  width: 50px;
+  height: 18px;
+  background: var(--pill-bg-collapsed);
+  border-radius: 3.5px;
+}
+
+.hud-pill.expanded-idle {
+  width: 340px;
+  height: 88px;
+  background: var(--pill-bg);
+  border-color: var(--pill-border);
+  border-radius: 22px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px 20px;
+}
+
+.hud-pill.shortcut-listening {
+  width: 76px;
+  height: 24px;
+  background: var(--pill-bg);
+  border-color: var(--pill-border);
+  border-radius: 12px;
+  gap: 3px;
+  padding: 0 10px;
+}
+
+.hud-pill.recording-controls {
+  width: 138px;
+  height: 40px;
+  background: var(--pill-bg);
+  border-color: var(--pill-border);
+  border-radius: 22px;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.hud-pill.processing {
+  width: 220px;
+  height: 44px;
+  background: var(--pill-bg);
+  border-color: var(--pill-border);
+  border-radius: 22px;
+  gap: 10px;
+  padding: 0 16px;
+}
+
+.hud-pill.hidden {
+  opacity: 0;
+  pointer-events: none;
+  width: 50px;
+  height: 18px;
+}
+
+.hud-title {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.hud-subtitle {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 12px;
+  color: var(--text-muted);
+  letter-spacing: -0.01em;
+}
+
+.hud-status {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  font-size: 13px;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.waveform {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 20px;
+}
+
+.waveform-bar {
+  width: 3px;
+  border-radius: 2px;
+  background: var(--amber);
+  min-height: 4px;
+  transition: height 0.05s ease-out;
+}
+
+.hud-btn {
+  background: none;
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 12px;
+  transition: background 0.12s, border-color 0.12s;
+  flex-shrink: 0;
+}
+
+.hud-btn:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.hud-btn.stop {
+  background: var(--danger);
+  border-color: var(--danger);
+  width: 32px;
+  height: 32px;
+}
+
+.hud-btn.stop:hover {
+  background: rgb(240, 100, 80);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.hud-pill.processing .hud-status {
+  animation: pulse 1.4s ease-in-out infinite;
+}

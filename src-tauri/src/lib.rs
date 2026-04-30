@@ -242,32 +242,35 @@ pub fn spawn_tasks(
             match state_rx.recv().await {
                 Some(s) => {
                     let show_hud = state_hud.config.read().unwrap().show_hud;
+                    let mode = state_hud.config.read().unwrap().recording_mode.clone();
                     match &s {
                         RecordingState::Error(_msg) => {
                             // Hide HUD immediately on error (tray tooltip shows the message)
-                            let _ = ah_hud.run_on_main_thread(|| hud::panel::update(hud::panel::HudState::Hidden));
+                            let ah_err = ah_hud.clone();
+                            hud::panel::update(&ah_err, hud::panel::HudState::Hidden);
                             let state_tx = state_tx_hud.clone();
                             let ah = ah_hud.clone();
                             tokio::spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
                                 let _ = state_tx.send(RecordingState::Idle).await;
-                                let _ = ah.run_on_main_thread(|| hud::panel::update(hud::panel::HudState::Hidden));
+                                hud::panel::update(&ah, hud::panel::HudState::Hidden);
                             });
                         }
                         other => {
-                            let hud_state = match other {
-                                RecordingState::Idle => hud::panel::HudState::Hidden,
-                                RecordingState::Recording => hud::panel::HudState::Recording,
-                                RecordingState::Processing => hud::panel::HudState::Processing,
-                                RecordingState::Error(_) => unreachable!(),
+                            let hud_state = if !show_hud {
+                                hud::panel::HudState::Hidden
+                            } else {
+                                match other {
+                                    RecordingState::Idle => hud::panel::HudState::CollapsedIdle,
+                                    RecordingState::Recording => match mode {
+                                        RecordingMode::PressAndHold => hud::panel::HudState::ShortcutListening,
+                                        RecordingMode::Toggle => hud::panel::HudState::RecordingControls,
+                                    },
+                                    RecordingState::Processing => hud::panel::HudState::Processing,
+                                    RecordingState::Error(_) => unreachable!(),
+                                }
                             };
-                            // Always hide; only show Recording/Processing when show_hud is on.
-                            let is_visible = matches!(hud_state, hud::panel::HudState::Recording | hud::panel::HudState::Processing);
-                            if !is_visible || show_hud {
-                                let _ = ah_hud.run_on_main_thread(move || {
-                                    hud::panel::update(hud_state);
-                                });
-                            }
+                            hud::panel::update(&ah_hud, hud_state);
                         }
                     }
                     update_tray_icon(&ah_hud, &s);

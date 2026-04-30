@@ -19,7 +19,8 @@
     ],
     "security": {
       "csp": null
-    }
+    },
+    "macOSPrivateApi": true
   },
   "build": {
     "frontendDist": "../src-ui/dist",

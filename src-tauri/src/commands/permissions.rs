@@ -24,3 +24,18 @@ pub fn request_microphone() {
 pub fn open_microphone_settings() {
     permissions::open_microphone_settings();
 }
+
+#[tauri::command]
+pub fn check_input_monitoring() -> bool {
+    permissions::has_input_monitoring()
+}
+
+#[tauri::command]
+pub fn request_input_monitoring() {
+    permissions::request_input_monitoring();
+}
+
+#[tauri::command]
+pub fn open_input_monitoring_settings() {
+    permissions::open_input_monitoring_settings();
+}

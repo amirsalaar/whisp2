@@ -13,7 +13,7 @@ use tauri::{
 };
 
 use whisp_rs_lib::{
-    commands::{audio::*, config::*, dictionary::*, history::*, model_download::*, permissions::*},
+    commands::{audio::*, config::*, dictionary::*, history::*, hud::*, model_download::*, permissions::*},
     config::persistence,
     history::store,
     hotkey::{event_tap, mode::HotkeyEvent},
@@ -84,6 +84,9 @@ async fn main() {
             check_microphone,
             request_microphone,
             open_microphone_settings,
+            check_input_monitoring,
+            request_input_monitoring,
+            open_input_monitoring_settings,
             open_model_url,
             get_dictionary,
             add_dictionary_entry,
@@ -94,6 +97,8 @@ async fn main() {
             download_whisper_model,
             abort_model_download,
             list_audio_input_devices,
+            hud_cancel_recording,
+            hud_stop_recording,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
@@ -131,11 +136,17 @@ async fn main() {
                 .build(app)?;
 
             // Create the floating HUD panel (must be on main thread)
-            panel::create();
+            panel::create(app.handle());
 
             // Install CGEventTap (requires Accessibility permission).
             // Pass state_arc.hotkey_mask so the tap and set_config share the same Arc.
             if permissions::has_accessibility() {
+                if !permissions::has_input_monitoring() {
+                    tracing::warn!(
+                        "Input Monitoring permission not granted — CGEventTap may be silently \
+                         disabled by macOS. Open Settings → Privacy & Security → Input Monitoring."
+                    );
+                }
                 if let Err(e) = event_tap::install(
                     hotkey,
                     hotkey_tx,
