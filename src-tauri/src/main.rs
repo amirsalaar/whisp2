@@ -108,8 +108,11 @@ async fn main() {
             let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit])?;
 
-            TrayIconBuilder::with_id("main")
-                .icon(app.default_window_icon().cloned().unwrap())
+            let mut tray_builder = TrayIconBuilder::with_id("main");
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray_builder = tray_builder.icon(icon);
+            }
+            tray_builder
                 .menu(&menu)
                 .tooltip("Whisp2")
                 .on_menu_event(|app, event| match event.id.as_ref() {
