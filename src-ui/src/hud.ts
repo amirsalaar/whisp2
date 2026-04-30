@@ -20,7 +20,6 @@ const BAR_PATTERN = [0.24, 0.42, 0.68, 0.92, 0.78, 0.54, 0.36, 0.62, 0.86, 0.58]
 let currentLevel = 0;
 let animClock = 0;  // seconds, incremented at 24fps
 let currentState: HudState = 'collapsed-idle';
-let rafId = 0;
 
 function getRoot(): HTMLElement {
   return document.getElementById('hud-root')!;
@@ -84,7 +83,7 @@ function tickWaveform(): void {
       bar.style.height = `${barHeight(i, cfg)}px`;
     });
   }
-  rafId = requestAnimationFrame(tickWaveform);
+  requestAnimationFrame(tickWaveform);
 }
 
 // ─── State renderers ─────────────────────────────────────────────────────────
@@ -220,7 +219,7 @@ async function init(): Promise<void> {
   renderState('collapsed-idle');
   document.body.style.opacity = '1';
 
-  rafId = requestAnimationFrame(tickWaveform);
+  requestAnimationFrame(tickWaveform);
 
   await listen<string>('hud_state', (event) => {
     const raw = event.payload;
