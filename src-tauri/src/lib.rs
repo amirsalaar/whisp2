@@ -211,7 +211,7 @@ pub fn spawn_tasks(
                 if let Err(e) = injection::text::type_text(&text, source_app.as_deref()) {
                     tracing::error!("text injection failed: {}", e);
                 } else if play_sound {
-                    std::thread::spawn(|| audio::sound::play());
+                    std::thread::spawn(audio::sound::play);
                 }
             });
         }
