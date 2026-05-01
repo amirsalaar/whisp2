@@ -20,7 +20,7 @@ type Provider = "open_a_i" | "groq" | "gemini" | "local_whisper";
 type Hotkey = "right_command" | "left_option" | "right_option" | "left_command" | "right_control" | "fn";
 
 const STEPS = ["welcome", "microphone", "engine", "engine_setup", "hotkey", "permissions", "done"] as const;
-type Step = typeof STEPS[number];
+type Step = (typeof STEPS)[number];
 
 const ENGINE_LABELS: Record<Provider, string> = {
   open_a_i: "OpenAI Whisper",
