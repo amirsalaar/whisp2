@@ -1,49 +1,34 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionProvider {
+    #[default]
     OpenAI,
     Groq,
     Gemini,
     LocalWhisper,
 }
 
-impl Default for TranscriptionProvider {
-    fn default() -> Self {
-        TranscriptionProvider::OpenAI
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingMode {
+    #[default]
     PressAndHold,
     Toggle,
 }
 
-impl Default for RecordingMode {
-    fn default() -> Self {
-        RecordingMode::PressAndHold
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HotkeyTrigger {
     LeftOption,
     RightOption,
     LeftCommand,
+    #[default]
     RightCommand,
     RightControl,
     /// Globe / Fn key — CGEventFlags::maskSecondaryFn
     Fn,
-}
-
-impl Default for HotkeyTrigger {
-    fn default() -> Self {
-        HotkeyTrigger::RightCommand
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

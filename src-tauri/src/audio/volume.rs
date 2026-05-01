@@ -23,7 +23,6 @@ struct AudioObjectPropertyAddress {
 }
 
 #[link(name = "AudioToolbox", kind = "framework")]
-#[link(name = "CoreAudio", kind = "framework")]
 extern "C" {
     fn AudioObjectGetPropertyData(
         object_id: u32,
@@ -33,7 +32,10 @@ extern "C" {
         data_size: *mut u32,
         data: *mut std::ffi::c_void,
     ) -> i32;
+}
 
+#[link(name = "CoreAudio", kind = "framework")]
+extern "C" {
     fn AudioObjectSetPropertyData(
         object_id: u32,
         address: *const AudioObjectPropertyAddress,

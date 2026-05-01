@@ -205,20 +205,15 @@ pub fn spawn_tasks(
     let ah_inj = app_handle.clone();
     let state_inj = Arc::clone(&state);
     rt.spawn(async move {
-        loop {
-            match text_rx.recv().await {
-                Some((text, source_app)) => {
-                    let play_sound = state_inj.config.read().unwrap().play_completion_sound;
-                    let _ = ah_inj.run_on_main_thread(move || {
-                        if let Err(e) = injection::text::type_text(&text, source_app.as_deref()) {
-                            tracing::error!("text injection failed: {}", e);
-                        } else if play_sound {
-                            std::thread::spawn(|| audio::sound::play());
-                        }
-                    });
+        while let Some((text, source_app)) = text_rx.recv().await {
+            let play_sound = state_inj.config.read().unwrap().play_completion_sound;
+            let _ = ah_inj.run_on_main_thread(move || {
+                if let Err(e) = injection::text::type_text(&text, source_app.as_deref()) {
+                    tracing::error!("text injection failed: {}", e);
+                } else if play_sound {
+                    std::thread::spawn(|| audio::sound::play());
                 }
-                None => break,
-            }
+            });
         }
     });
 }
