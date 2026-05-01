@@ -146,3 +146,41 @@ pub fn install(
         Err(_) => Err(anyhow::anyhow!("CGEventTap thread exited unexpectedly")),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::models::HotkeyTrigger;
+
+    #[test]
+    fn test_device_mask_nonzero() {
+        let variants = [
+            HotkeyTrigger::LeftOption,
+            HotkeyTrigger::RightOption,
+            HotkeyTrigger::LeftCommand,
+            HotkeyTrigger::RightCommand,
+            HotkeyTrigger::RightControl,
+        ];
+        for v in &variants {
+            assert_ne!(device_mask_for_trigger(v), 0);
+        }
+    }
+
+    #[test]
+    fn test_device_masks_distinct() {
+        let masks: Vec<u64> = [
+            HotkeyTrigger::LeftOption,
+            HotkeyTrigger::RightOption,
+            HotkeyTrigger::LeftCommand,
+            HotkeyTrigger::RightCommand,
+            HotkeyTrigger::RightControl,
+        ]
+        .iter()
+        .map(device_mask_for_trigger)
+        .collect();
+        let mut sorted = masks.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.len(), masks.len());
+    }
+}

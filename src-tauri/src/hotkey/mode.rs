@@ -16,8 +16,31 @@ pub enum RecordingCommand {
 }
 
 /// Events emitted by the CGEventTap callback.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HotkeyEvent {
     KeyDown(Option<String>), // frontmost bundle ID at press time
     KeyUp,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_recording_state_eq() {
+        assert_eq!(RecordingState::Idle, RecordingState::Idle);
+        assert_ne!(RecordingState::Idle, RecordingState::Recording);
+    }
+
+    #[test]
+    fn test_recording_state_clone() {
+        let s = RecordingState::Error("oops".into());
+        assert_eq!(s.clone(), RecordingState::Error("oops".into()));
+    }
+
+    #[test]
+    fn test_hotkey_event_clone() {
+        let e = HotkeyEvent::KeyDown(Some("com.apple.Safari".into()));
+        assert_eq!(e.clone(), HotkeyEvent::KeyDown(Some("com.apple.Safari".into())));
+    }
 }
