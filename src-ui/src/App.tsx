@@ -201,23 +201,35 @@ export default function App() {
   const [downloadProgress, setDownloadProgress] =
     useState<DownloadProgress | null>(null);
   const [inputDevices, setInputDevices] = useState<string[]>([]);
+  const [platform, setPlatform] = useState<string | null>(null);
+
+  const isIos = platform === "ios";
 
   async function refreshPermissions() {
     setCheckingPerms(true);
-    const [a, m, im] = await Promise.all([
-      invoke<boolean>("check_accessibility"),
-      invoke<boolean>("check_microphone"),
-      invoke<boolean>("check_input_monitoring"),
-    ]);
-    setAccessibility(a);
-    setMicrophone(m);
-    setInputMonitoring(im);
+    if (platform === "ios") {
+      const m = await invoke<boolean>("check_microphone");
+      setMicrophone(m);
+      setAccessibility(null);
+      setInputMonitoring(null);
+    } else {
+      const [a, m, im] = await Promise.all([
+        invoke<boolean>("check_accessibility"),
+        invoke<boolean>("check_microphone"),
+        invoke<boolean>("check_input_monitoring"),
+      ]);
+      setAccessibility(a);
+      setMicrophone(m);
+      setInputMonitoring(im);
+    }
     setCheckingPerms(false);
   }
 
   useEffect(() => {
+    invoke<string>("get_platform").then((p) => {
+      setPlatform(p);
+    });
     invoke<AppConfig>("get_config").then(setConfig);
-    void refreshPermissions(); // eslint-disable-line react-hooks/set-state-in-effect
     invoke<string | null>("get_api_key", { keyName: "openai_api_key" }).then(
       (k) => k && setOpenaiKey("••••••••"),
     );
@@ -231,19 +243,19 @@ export default function App() {
     invoke<string[]>("get_downloaded_models").then(setDownloadedModels);
     invoke<string[]>("list_audio_input_devices").then(setInputDevices);
 
-    // Re-check permissions when window regains focus (user may have visited System Settings)
     const onFocus = () => refreshPermissions();
     window.addEventListener("focus", onFocus);
 
-    let unlisten: (() => void) | undefined;
+    const unlisteners: Array<() => void> = [];
+
     listen<DownloadProgress>("model_download_progress", (e) => {
       setDownloadProgress(e.payload);
-    }).then((fn) => {
-      unlisten = fn;
-    });
+    }).then((fn) => unlisteners.push(fn));
+
+
     return () => {
       window.removeEventListener("focus", onFocus);
-      unlisten?.();
+      unlisteners.forEach((fn) => fn());
     };
   }, []);
 
@@ -375,9 +387,9 @@ export default function App() {
   );
 
   return (
-    <div className="app">
-      {/* ── Sidebar ── */}
-      <nav className="sidebar">
+    <div className={`app${isIos ? " app--ios" : ""}`}>
+      {/* ── Sidebar (macOS only) ── */}
+      {!isIos && <nav className="sidebar">
         <div className="brand">
           <svg
             className="brand-icon"
@@ -454,14 +466,17 @@ export default function App() {
           >
             <span className="nav-icon-wrap">
               <IconShield />
-              {(accessibility === false ||
-                microphone === false ||
-                inputMonitoring === false) && <span className="nav-badge" />}
+              {(microphone === false ||
+                (!isIos &&
+                  (accessibility === false ||
+                    inputMonitoring === false))) && (
+                <span className="nav-badge" />
+              )}
             </span>
             Permissions
           </button>
         </div>
-      </nav>
+      </nav>}
 
       {/* ── Content ── */}
       <main className="content">
@@ -831,52 +846,56 @@ export default function App() {
             <div className="section-group">
               <div className="section-label">Recording</div>
               <div className="settings-card">
-                <div className="settings-row">
-                  <div className="row-label">
-                    <span className="row-title">Hotkey</span>
-                    <span className="row-desc">Hold to record or toggle</span>
-                  </div>
-                  <div className="row-control">
-                    <select
-                      className="row-select"
-                      value={config.hotkey}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          hotkey: e.target.value as AppConfig["hotkey"],
-                        })
-                      }
-                    >
-                      <option value="right_command">Right ⌘</option>
-                      <option value="left_option">Left ⌥</option>
-                      <option value="right_option">Right ⌥</option>
-                      <option value="left_command">Left ⌘</option>
-                      <option value="right_control">Right ⌃</option>
-                      <option value="fn">Fn / Globe 🌐</option>
-                    </select>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="row-label">
-                    <span className="row-title">Mode</span>
-                  </div>
-                  <div className="row-control">
-                    <select
-                      className="row-select"
-                      value={config.recording_mode}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          recording_mode: e.target
-                            .value as AppConfig["recording_mode"],
-                        })
-                      }
-                    >
-                      <option value="press_and_hold">Press and Hold</option>
-                      <option value="toggle">Toggle</option>
-                    </select>
-                  </div>
-                </div>
+                {!isIos && (
+                  <>
+                    <div className="settings-row">
+                      <div className="row-label">
+                        <span className="row-title">Hotkey</span>
+                        <span className="row-desc">Hold to record or toggle</span>
+                      </div>
+                      <div className="row-control">
+                        <select
+                          className="row-select"
+                          value={config.hotkey}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              hotkey: e.target.value as AppConfig["hotkey"],
+                            })
+                          }
+                        >
+                          <option value="right_command">Right ⌘</option>
+                          <option value="left_option">Left ⌥</option>
+                          <option value="right_option">Right ⌥</option>
+                          <option value="left_command">Left ⌘</option>
+                          <option value="right_control">Right ⌃</option>
+                          <option value="fn">Fn / Globe 🌐</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="settings-row">
+                      <div className="row-label">
+                        <span className="row-title">Mode</span>
+                      </div>
+                      <div className="row-control">
+                        <select
+                          className="row-select"
+                          value={config.recording_mode}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              recording_mode: e.target
+                                .value as AppConfig["recording_mode"],
+                            })
+                          }
+                        >
+                          <option value="press_and_hold">Press and Hold</option>
+                          <option value="toggle">Toggle</option>
+                        </select>
+                      </div>
+                    </div>
+                  </>
+                )}
                 <div className="settings-row">
                   <div className="row-label">
                     <span className="row-title">Microphone</span>
@@ -908,18 +927,20 @@ export default function App() {
             <div className="section-group">
               <div className="section-label">Preferences</div>
               <div className="settings-card">
-                <div className="settings-row">
-                  <div className="row-label">
-                    <span className="row-title">Show floating HUD</span>
-                    <span className="row-desc">Displays while recording</span>
+                {!isIos && (
+                  <div className="settings-row">
+                    <div className="row-label">
+                      <span className="row-title">Show floating HUD</span>
+                      <span className="row-desc">Displays while recording</span>
+                    </div>
+                    <div className="row-control">
+                      <Toggle
+                        checked={config.show_hud}
+                        onChange={(v) => setConfig({ ...config, show_hud: v })}
+                      />
+                    </div>
                   </div>
-                  <div className="row-control">
-                    <Toggle
-                      checked={config.show_hud}
-                      onChange={(v) => setConfig({ ...config, show_hud: v })}
-                    />
-                  </div>
-                </div>
+                )}
                 <div className="settings-row">
                   <div className="row-label">
                     <span className="row-title">Completion sound</span>
@@ -1015,8 +1036,9 @@ export default function App() {
                 <div className="empty-state-icon">◎</div>
                 <div className="empty-state-title">No transcriptions yet</div>
                 <div className="empty-state-desc">
-                  Hold your hotkey and speak — your transcriptions will appear
-                  here.
+                  {isIos
+                    ? "Hold the record button and speak — your transcriptions will appear here."
+                    : "Hold your hotkey and speak — your transcriptions will appear here."}
                 </div>
               </div>
             ) : (
@@ -1111,7 +1133,9 @@ export default function App() {
             <div className="page-header">
               <h1 className="page-title">Permissions</h1>
               <p className="page-subtitle">
-                Whisp needs system access to record audio and detect hotkeys.
+                {isIos
+                  ? "Whisp needs microphone access to record audio."
+                  : "Whisp needs system access to record audio and detect hotkeys."}
               </p>
             </div>
 
@@ -1163,7 +1187,8 @@ export default function App() {
               </div>
             </div>
 
-            {/* Accessibility card */}
+            {/* Accessibility card — macOS only */}
+            {!isIos && (
             <div className="section-group">
               <div className="section-label">Accessibility</div>
               <div className="permission-card">
@@ -1203,8 +1228,10 @@ export default function App() {
                 </p>
               </div>
             </div>
+            )}
 
-            {/* Input Monitoring card */}
+            {/* Input Monitoring card — macOS only */}
+            {!isIos && (
             <div className="section-group">
               <div className="section-label">Input Monitoring</div>
               <div className="permission-card">
@@ -1252,9 +1279,50 @@ export default function App() {
                 </p>
               </div>
             </div>
+            )}
           </>
         )}
       </main>
+
+      {/* ── iOS bottom bar (tab strip only) ── */}
+      {isIos && (
+        <div className="ios-bottom-bar">
+          {/* Tab strip */}
+          <div className="ios-tab-strip">
+            <button
+              className={`ios-tab-btn${tab === "settings" ? " active" : ""}`}
+              onClick={() => setTab("settings")}
+            >
+              <IconSettings />
+              <span>Settings</span>
+            </button>
+            <button
+              className={`ios-tab-btn${tab === "history" ? " active" : ""}`}
+              onClick={() => setTab("history")}
+            >
+              <IconHistory />
+              <span>History</span>
+            </button>
+            <button
+              className={`ios-tab-btn${tab === "dictionary" ? " active" : ""}`}
+              onClick={() => setTab("dictionary")}
+            >
+              <IconDict />
+              <span>Dictionary</span>
+            </button>
+            <button
+              className={`ios-tab-btn${tab === "permissions" ? " active" : ""}`}
+              onClick={() => setTab("permissions")}
+            >
+              <span className="nav-icon-wrap">
+                <IconShield />
+                {microphone === false && <span className="nav-badge" />}
+              </span>
+              <span>Permissions</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -664,13 +664,19 @@ body {
 /* ── Dictionary ──────────────────────────────────────────── */
 .dict-add-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 12px;
 }
 
 .dict-add-row .row-input {
   flex: 1;
+  min-width: 100px;
   width: auto;
+}
+
+.dict-add-row .btn-primary {
+  flex-shrink: 0;
 }
 
 .dict-entry {
@@ -853,3 +859,68 @@ body {
   background: #e8a928;
   border: 1.5px solid var(--sidebar-bg);
 }
+
+/* ── iOS layout overrides ───────────────────────────────── */
+.app--ios {
+  flex-direction: column;
+}
+
+.app--ios .content {
+  padding: 20px 16px;
+  padding-bottom: 80px;
+}
+
+/* ── iOS bottom bar (record + tab strip) ─────────────────── */
+.ios-bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  z-index: 100;
+}
+
+/* ── iOS tab strip ───────────────────────────────────────── */
+.ios-tab-strip {
+  display: flex;
+  width: 100%;
+  border-top: 1px solid var(--border);
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.ios-tab-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 4px 6px;
+  font-size: 10px;
+  font-family: var(--font-sans);
+  color: var(--text-muted);
+  min-height: 44px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.ios-tab-btn .nav-icon {
+  width: 18px;
+  height: 18px;
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.ios-tab-btn.active {
+  color: var(--text);
+}
+
+.ios-tab-btn.active .nav-icon {
+  opacity: 1;
+}
+
