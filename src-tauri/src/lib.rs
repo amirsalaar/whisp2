@@ -370,3 +370,45 @@ fn update_tray_icon(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mic_icon_buffer_size() {
+        let buf = render_mic_icon(22, 255, 0, 0, 255);
+        assert_eq!(buf.len(), 22 * 22 * 4);
+    }
+
+    #[test]
+    fn test_mic_icon_has_pixels() {
+        let buf = render_mic_icon(22, 255, 0, 0, 255);
+        assert!(buf.chunks(4).any(|p| p[3] != 0));
+    }
+
+    #[test]
+    fn test_equalizer_buffer_size() {
+        let buf = render_equalizer_frame(22, 0.0, 255, 255, 255);
+        assert_eq!(buf.len(), 22 * 22 * 4);
+    }
+
+    #[test]
+    fn test_equalizer_animates() {
+        let frame_t0 = render_equalizer_frame(22, 0.0, 255, 255, 255);
+        let frame_t1 = render_equalizer_frame(22, 1.0, 255, 255, 255);
+        assert_ne!(frame_t0, frame_t1);
+    }
+
+    #[test]
+    fn test_spinner_buffer_size() {
+        let buf = render_spinner_icon(22, 255, 255, 255);
+        assert_eq!(buf.len(), 22 * 22 * 4);
+    }
+
+    #[test]
+    fn test_spinner_has_pixels() {
+        let buf = render_spinner_icon(22, 255, 255, 255);
+        assert!(buf.chunks(4).any(|p| p[3] != 0));
+    }
+}
