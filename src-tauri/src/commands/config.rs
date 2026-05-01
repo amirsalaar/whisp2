@@ -1,11 +1,11 @@
-use std::sync::atomic::Ordering;
-
 use tauri::State;
 
 use crate::config::models::AppConfig;
 use crate::config::persistence;
-use crate::hotkey::event_tap::device_mask_for_trigger;
 use crate::AppState;
+
+#[cfg(target_os = "macos")]
+use crate::hotkey::event_tap::device_mask_for_trigger;
 
 #[tauri::command]
 pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
@@ -15,9 +15,13 @@ pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
 
 #[tauri::command]
 pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
-    // Update live hotkey mask so CGEventTap picks up changes immediately.
-    let new_mask = device_mask_for_trigger(&config.hotkey);
-    state.hotkey_mask.store(new_mask, Ordering::Relaxed);
+    // Update live hotkey mask so CGEventTap picks up changes immediately (macOS only).
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::atomic::Ordering;
+        let new_mask = device_mask_for_trigger(&config.hotkey);
+        state.hotkey_mask.store(new_mask, Ordering::Relaxed);
+    }
 
     // If the model path changed, invalidate the cached WhisperContext so it reloads.
     {
@@ -57,4 +61,14 @@ pub fn open_model_url() {
     let _ = std::process::Command::new("open")
         .arg("https://huggingface.co/ggerganov/whisper.cpp/tree/main")
         .spawn();
+}
+
+#[tauri::command]
+pub fn get_platform() -> &'static str {
+    #[cfg(target_os = "macos")]
+    { "macos" }
+    #[cfg(target_os = "ios")]
+    { "ios" }
+    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    { "other" }
 }

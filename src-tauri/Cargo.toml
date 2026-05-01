@@ -61,14 +61,11 @@ base64 = "0.22"
 # WAV encoding (in-memory)
 hound = "3"
 
-# macOS low-level bindings (CGEventTap, NSPanel, etc.)
-core-foundation = "0.10"
-core-graphics = { version = "0.24", features = ["highsierra"] }
+whisper-rs = { version = "0.16", features = ["metal"] }
 
-# Objective-C2 runtime bindings
+# Objective-C2 runtime bindings (iOS + macOS)
 objc2 = "0.6"
 block2 = "0.6"
-whisper-rs = { version = "0.16", features = ["metal"] }
 objc2-core-foundation = "0.3"
 objc2-foundation = { version = "0.3", features = [
   "NSString",
@@ -79,6 +76,24 @@ objc2-foundation = { version = "0.3", features = [
   "NSGeometry",
   "objc2-core-foundation",
 ] }
+
+# UUID for record IDs
+uuid = { version = "1", features = ["v4"] }
+
+# Chrono for timestamps
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async trait
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros"] }
+tempfile = "3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS low-level bindings (CGEventTap, NSPanel, etc.)
+core-foundation = "0.10"
+core-graphics = { version = "0.24", features = ["highsierra"] }
 objc2-app-kit = { version = "0.3", features = [
   "NSApplication",
   "NSPanel",
@@ -100,22 +115,6 @@ objc2-app-kit = { version = "0.3", features = [
   "NSText",
   "NSVisualEffectView",
 ] }
-
-# UUID for record IDs
-uuid = { version = "1", features = ["v4"] }
-
-# Chrono for timestamps
-chrono = { version = "0.4", features = ["serde"] }
-
-# Async trait
-async-trait = "0.1"
-
-[dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
-tempfile = "3"
-
-[target.'cfg(target_os = "macos")'.dependencies]
-# macOS-specific only
 
 [profile.dev]
 opt-level = 0

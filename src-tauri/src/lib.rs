@@ -2,22 +2,37 @@ use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 
+use crate::config::models::AppConfig;
+use crate::hotkey::mode::RecordingCommand;
+
+#[cfg(target_os = "macos")]
 use crate::audio::capture;
-use crate::config::models::{AppConfig, RecordingMode};
-use crate::hotkey::mode::{HotkeyEvent, RecordingCommand, RecordingState};
+#[cfg(target_os = "macos")]
+use crate::config::models::RecordingMode;
+#[cfg(target_os = "macos")]
+use crate::hotkey::mode::{HotkeyEvent, RecordingState};
+#[cfg(target_os = "macos")]
 use crate::transcription::manager;
 
-pub mod app_context;
+#[cfg(not(target_os = "macos"))]
+use crate::audio::capture;
+#[cfg(not(target_os = "macos"))]
+use crate::transcription::manager;
+
 pub mod audio;
 pub mod commands;
 pub mod config;
 pub mod correction;
 pub mod history;
 pub mod hotkey;
-pub mod injection;
 pub mod keychain;
-pub mod permissions;
 pub mod transcription;
+
+#[cfg(target_os = "macos")]
+pub mod app_context;
+#[cfg(target_os = "macos")]
+pub mod injection;
+pub mod permissions;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -30,6 +45,7 @@ pub struct AppState {
 }
 
 /// Spawns all background async tasks. Called once inside Tauri's `setup` hook.
+#[cfg(target_os = "macos")]
 pub fn spawn_tasks(
     app_handle: tauri::AppHandle,
     state: Arc<AppState>,
@@ -218,6 +234,7 @@ pub fn spawn_tasks(
     });
 }
 
+#[cfg(target_os = "macos")]
 fn render_waveform_idle(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
     // Mirrors the sidebar SVG: 5 bars bottom-aligned, bell-curve heights.
@@ -247,6 +264,7 @@ fn render_waveform_idle(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
 }
 
 /// True if (fx, fy) falls inside the rounded-rect defined by the given bounds and corner radius.
+#[cfg(target_os = "macos")]
 fn in_rounded_rect(fx: f32, fy: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> bool {
     if fx < x0 || fx > x1 || fy < y0 || fy > y1 { return false; }
     let cx = fx.max(x0 + r).min(x1 - r);
@@ -257,6 +275,7 @@ fn in_rounded_rect(fx: f32, fy: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32)
 }
 
 /// Draws a colored pill background into `pixels` (22×22 canvas, full-width capsule).
+#[cfg(target_os = "macos")]
 fn draw_pill(pixels: &mut [u8], size: u32, r: u8, g: u8, b: u8) {
     let s = size as f32;
     // Full-width capsule: x 1..s-1, y 4..s-4, radius = half height = (s-8)/2.
@@ -279,6 +298,7 @@ fn draw_pill(pixels: &mut [u8], size: u32, r: u8, g: u8, b: u8) {
 
 /// Animated waveform equalizer — colored pill bg with white bars on top.
 /// `r/g/b` sets the pill color; bars are always white.
+#[cfg(target_os = "macos")]
 fn render_equalizer_frame(size: u32, t: f32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
     draw_pill(&mut pixels, size, r, g, b);
@@ -311,6 +331,7 @@ fn render_equalizer_frame(size: u32, t: f32, r: u8, g: u8, b: u8) -> Vec<u8> {
 }
 
 /// Spinner arc — colored pill bg with a white partial-circle arc on top.
+#[cfg(target_os = "macos")]
 fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
     draw_pill(&mut pixels, size, r, g, b);
@@ -340,6 +361,7 @@ fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
 }
 
 /// Static waveform on a colored pill — used for the Error state.
+#[cfg(target_os = "macos")]
 fn render_waveform_pill(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     // Reuse idle waveform (white) then overlay a pill background first.
     let mut pixels = vec![0u8; (size * size * 4) as usize];
@@ -370,10 +392,12 @@ fn render_waveform_pill(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
 
 /// Sets the tray icon to the idle waveform immediately. Call this right after the
 /// tray is built in `main.rs` so the waveform replaces the default `.png` icon at launch.
+#[cfg(target_os = "macos")]
 pub fn set_idle_tray_icon(app: &tauri::AppHandle) {
     set_tray(app, "Whisp", render_waveform_idle(22, 255, 255, 255, 200), 22);
 }
 
+#[cfg(target_os = "macos")]
 fn set_tray(app: &tauri::AppHandle, tooltip: &str, pixels: Vec<u8>, size: u32) {
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(tooltip));
@@ -382,6 +406,7 @@ fn set_tray(app: &tauri::AppHandle, tooltip: &str, pixels: Vec<u8>, size: u32) {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn update_tray_icon(
     app: &tauri::AppHandle,
     state: &RecordingState,
@@ -421,7 +446,280 @@ fn update_tray_icon(
     }
 }
 
-#[cfg(test)]
+/// Mobile audio pipeline: capture → transcribe → emit result event + copy to clipboard.
+/// No volume boost, no CGEvent injection — output goes to the frontend via event.
+#[cfg(not(target_os = "macos"))]
+async fn spawn_mobile_audio_task(
+    app_handle: tauri::AppHandle,
+    state: Arc<AppState>,
+    mut cmd_rx: mpsc::Receiver<RecordingCommand>,
+) {
+    use tauri::Emitter;
+
+    let mut stop_tx: Option<mpsc::Sender<()>> = None;
+    let mut pcm_rx: Option<mpsc::Receiver<Vec<f32>>> = None;
+
+    loop {
+        match cmd_rx.recv().await {
+            Some(RecordingCommand::Start(_)) => {
+                let input_device = state.config.read().unwrap().input_device.clone();
+                match capture::start_recording(input_device) {
+                    Ok((tx, rx)) => {
+                        stop_tx = Some(tx);
+                        pcm_rx = Some(rx);
+                        let _ = app_handle.emit("recording_state_changed", "recording");
+                        tracing::info!("mobile recording started");
+                    }
+                    Err(e) => {
+                        tracing::error!("failed to start recording: {}", e);
+                        let _ = app_handle.emit("recording_state_changed", "idle");
+                    }
+                }
+            }
+            Some(RecordingCommand::Stop) => {
+                drop(stop_tx.take());
+                let _ = app_handle.emit("recording_state_changed", "processing");
+
+                if let Some(mut rx) = pcm_rx.take() {
+                    let config = state.config.read().unwrap().clone();
+                    let db = state.db.clone();
+                    let whisper_ctx = Arc::clone(&state.whisper_ctx);
+                    let ah = app_handle.clone();
+
+                    tokio::spawn(async move {
+                        let samples = rx.recv().await;
+                        match samples {
+                            Some(s) if !s.is_empty() => {
+                                match capture::encode_wav(&s) {
+                                    Ok(wav) => {
+                                        match manager::transcribe(&config, wav, whisper_ctx).await {
+                                            Ok(text) => {
+                                                tracing::info!("mobile transcribed: {}", text);
+                                                let text = crate::correction::dictionary::apply(text);
+                                                if config.save_history {
+                                                    let provider_name = format!("{:?}", config.provider);
+                                                    if let Err(e) = crate::history::store::insert(
+                                                        &db, &text, None, &provider_name,
+                                                    ).await {
+                                                        tracing::warn!("history insert failed: {}", e);
+                                                    } else if let Some(max) = config.max_history_entries {
+                                                        if let Err(e) = crate::history::store::prune(&db, max).await {
+                                                            tracing::warn!("history prune failed: {}", e);
+                                                        }
+                                                    }
+                                                }
+                                                let _ = ah.emit("transcription_result", &text);
+                                                let _ = ah.emit("recording_state_changed", "idle");
+                                            }
+                                            Err(e) => {
+                                                tracing::error!("transcription failed: {}", e);
+                                                let _ = ah.emit("recording_state_changed", "idle");
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("WAV encode failed: {}", e);
+                                        let _ = ah.emit("recording_state_changed", "idle");
+                                    }
+                                }
+                            }
+                            _ => {
+                                tracing::warn!("no audio captured");
+                                let _ = ah.emit("recording_state_changed", "idle");
+                            }
+                        }
+                    });
+                } else {
+                    let _ = app_handle.emit("recording_state_changed", "idle");
+                }
+            }
+            Some(RecordingCommand::Cancel) | None => {
+                drop(stop_tx.take());
+                drop(pcm_rx.take());
+                let _ = app_handle.emit("recording_state_changed", "idle");
+                if cmd_rx.is_closed() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// App entry point called by both `main.rs` (desktop) and the iOS/Android mobile_entry_point.
+/// All Tauri builder setup lives here so the iOS linker can find the required runtime symbols.
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
+pub fn run() {
+    use std::sync::atomic::AtomicBool;
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::SqlitePool;
+    use tokio::sync::Mutex as TokioMutex;
+
+    let rt = tokio::runtime::Runtime::new().expect("failed to create Tokio runtime");
+    rt.block_on(async {
+        let config = config::persistence::load().unwrap_or_default();
+
+        let db_path = config::persistence::app_support_dir()
+            .expect("cannot determine app support dir")
+            .join("history.db");
+
+        let db_options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true);
+
+        let db = SqlitePool::connect_with(db_options)
+            .await
+            .expect("failed to open SQLite database");
+
+        history::store::create_schema(&db)
+            .await
+            .expect("failed to create history schema");
+
+        let (cmd_tx, cmd_rx) = mpsc::channel::<RecordingCommand>(8);
+
+        let app_state = AppState {
+            config: Arc::new(RwLock::new(config)),
+            db,
+            hotkey_mask: Arc::new(AtomicU64::new(0)),
+            whisper_ctx: Arc::new(TokioMutex::new((None, None))),
+            download_abort: Arc::new(AtomicBool::new(false)),
+            recording_cmd_tx: cmd_tx,
+        };
+
+        #[cfg(target_os = "macos")]
+        let hotkey = app_state.config.read().unwrap().hotkey.clone();
+        #[cfg(target_os = "macos")]
+        let (hotkey_tx, hotkey_rx) = std::sync::mpsc::sync_channel::<HotkeyEvent>(64);
+
+        let state_arc = Arc::new(app_state.clone());
+
+        let mut builder = tauri::Builder::default()
+            .plugin(tauri_plugin_dialog::init())
+            .manage(app_state)
+            .invoke_handler(tauri::generate_handler![
+                commands::config::get_config,
+                commands::config::set_config,
+                commands::config::get_api_key,
+                commands::config::set_api_key,
+                commands::config::delete_api_key,
+                commands::history::get_history,
+                commands::history::delete_history_entry,
+                commands::history::clear_history,
+                commands::permissions::check_accessibility,
+                commands::permissions::open_accessibility_settings,
+                commands::permissions::check_microphone,
+                commands::permissions::request_microphone,
+                commands::permissions::open_microphone_settings,
+                commands::permissions::check_input_monitoring,
+                commands::permissions::request_input_monitoring,
+                commands::permissions::open_input_monitoring_settings,
+                commands::config::open_model_url,
+                commands::dictionary::get_dictionary,
+                commands::dictionary::add_dictionary_entry,
+                commands::dictionary::remove_dictionary_entry,
+                commands::model_download::list_whisper_models,
+                commands::model_download::get_models_dir,
+                commands::model_download::get_downloaded_models,
+                commands::model_download::download_whisper_model,
+                commands::model_download::abort_model_download,
+                commands::audio::list_audio_input_devices,
+                commands::audio::start_recording_mobile,
+                commands::audio::stop_recording_mobile,
+                commands::config::get_platform,
+            ]);
+
+        #[cfg(target_os = "macos")]
+        {
+            use tauri::{
+                menu::{Menu, MenuItem},
+                tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
+                Manager,
+            };
+            builder = builder.setup(move |app| {
+                let app_handle = app.handle().clone();
+
+                let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+                let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
+                let menu = Menu::with_items(app, &[&settings_item, &quit])?;
+
+                let mut tray_builder = TrayIconBuilder::with_id("main");
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    tray_builder = tray_builder.icon(icon);
+                }
+                tray_builder
+                    .menu(&menu)
+                    .tooltip("Whisp2")
+                    .on_menu_event(|app, event| match event.id.as_ref() {
+                        "quit" => app.exit(0),
+                        "settings" => {
+                            if let Some(w) = app.get_webview_window("settings") {
+                                let _ = w.show();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|_tray, event| {
+                        if let TrayIconEvent::Click { button: MouseButton::Left, .. } = event {}
+                    })
+                    .build(app)?;
+
+                set_idle_tray_icon(&app_handle);
+
+                if permissions::has_accessibility() {
+                    if !permissions::has_input_monitoring() {
+                        tracing::warn!("Input Monitoring not granted — CGEventTap may be disabled");
+                    }
+                    if let Err(e) = hotkey::event_tap::install(
+                        hotkey, hotkey_tx, Arc::clone(&state_arc.hotkey_mask),
+                    ) {
+                        tracing::error!("CGEventTap install failed: {}", e);
+                    }
+                } else {
+                    tracing::warn!("Accessibility not granted — hotkey recording disabled");
+                }
+
+                spawn_tasks(app_handle, state_arc.clone(), hotkey_rx, cmd_rx);
+
+                {
+                    use config::models::TranscriptionProvider;
+                    let cfg = state_arc.config.read().unwrap().clone();
+                    let needs_setup = match &cfg.provider {
+                        TranscriptionProvider::OpenAI =>
+                            matches!(keychain::get("openai_api_key"), Ok(None)),
+                        TranscriptionProvider::Groq =>
+                            matches!(keychain::get("groq_api_key"), Ok(None)),
+                        TranscriptionProvider::Gemini =>
+                            matches!(keychain::get("gemini_api_key"), Ok(None)),
+                        TranscriptionProvider::LocalWhisper =>
+                            cfg.local_whisper_model_path.is_none(),
+                    };
+                    if needs_setup {
+                        if let Some(w) = app.get_webview_window("settings") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                }
+                Ok(())
+            });
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            builder = builder.setup(move |app| {
+                let app_handle = app.handle().clone();
+                tokio::spawn(spawn_mobile_audio_task(app_handle, state_arc.clone(), cmd_rx));
+                Ok(())
+            });
+        }
+
+        builder
+            .run(tauri::generate_context!())
+            .expect("error running Whisp");
+    });
+}
+
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
