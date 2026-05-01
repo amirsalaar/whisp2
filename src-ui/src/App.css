@@ -65,8 +65,10 @@ body {
 }
 
 .brand-icon {
-  font-size: 17px;
-  line-height: 1;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--text);
 }
 
 .brand-name {
