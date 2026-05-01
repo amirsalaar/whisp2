@@ -202,6 +202,7 @@ export default function App() {
     useState<DownloadProgress | null>(null);
   const [inputDevices, setInputDevices] = useState<string[]>([]);
   const [platform, setPlatform] = useState<string | null>(null);
+  const [mobileRecording, setMobileRecording] = useState<"idle" | "recording" | "processing">("idle");
 
   const isIos = platform === "ios";
 
@@ -277,6 +278,10 @@ export default function App() {
         setHistory(entries);
         setTab("history");
       });
+    }).then((fn) => unlisteners.push(fn));
+
+    listen<string>("recording_state_changed", (e) => {
+      setMobileRecording(e.payload as "idle" | "recording" | "processing");
     }).then((fn) => unlisteners.push(fn));
 
     return () => {
@@ -1310,9 +1315,36 @@ export default function App() {
         )}
       </main>
 
-      {/* ── iOS bottom bar (tab strip only) ── */}
+      {/* ── iOS bottom bar ── */}
       {isIos && (
         <div className="ios-bottom-bar">
+          {/* Record section */}
+          <div className="ios-record-section">
+            <button
+              className={`ios-record-btn${mobileRecording !== "idle" ? " ios-record-btn--active" : ""}`}
+              disabled={mobileRecording === "processing"}
+              onClick={async () => {
+                if (mobileRecording === "idle") {
+                  await invoke("start_recording_mobile").catch(console.error);
+                } else if (mobileRecording === "recording") {
+                  await invoke("stop_recording_mobile").catch(console.error);
+                }
+              }}
+            >
+              {mobileRecording === "processing" ? (
+                <span className="ios-record-spinner" />
+              ) : mobileRecording === "recording" ? (
+                <span className="ios-record-stop" />
+              ) : (
+                <svg viewBox="0 0 24 24" fill="currentColor" width="28" height="28">
+                  <path d="M12 1a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V5a4 4 0 0 1 4-4zm-1 16.93A8.001 8.001 0 0 1 4 10H2a10 10 0 0 0 9 9.95V22h2v-2.05A10 10 0 0 0 22 10h-2a8 8 0 0 1-7 7.93z"/>
+                </svg>
+              )}
+            </button>
+            <span className="ios-record-label">
+              {mobileRecording === "processing" ? "Transcribing…" : mobileRecording === "recording" ? "Tap to stop" : "Tap to record"}
+            </span>
+          </div>
           {/* Tab strip */}
           <div className="ios-tab-strip">
             <button
