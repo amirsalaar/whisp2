@@ -207,22 +207,25 @@ export default function App() {
 
   async function refreshPermissions() {
     setCheckingPerms(true);
-    if (platform === "ios") {
-      const m = await invoke<boolean>("check_microphone");
-      setMicrophone(m);
-      setAccessibility(null);
-      setInputMonitoring(null);
-    } else {
-      const [a, m, im] = await Promise.all([
-        invoke<boolean>("check_accessibility"),
-        invoke<boolean>("check_microphone"),
-        invoke<boolean>("check_input_monitoring"),
-      ]);
-      setAccessibility(a);
-      setMicrophone(m);
-      setInputMonitoring(im);
+    try {
+      if (platform === "ios") {
+        const m = await invoke<boolean>("check_microphone");
+        setMicrophone(m);
+        setAccessibility(null);
+        setInputMonitoring(null);
+      } else {
+        const [a, m, im] = await Promise.all([
+          invoke<boolean>("check_accessibility"),
+          invoke<boolean>("check_microphone"),
+          invoke<boolean>("check_input_monitoring"),
+        ]);
+        setAccessibility(a);
+        setMicrophone(m);
+        setInputMonitoring(im);
+      }
+    } finally {
+      setCheckingPerms(false);
     }
-    setCheckingPerms(false);
   }
 
   useEffect(() => {
