@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionProvider {
     OpenAI,
@@ -15,7 +15,7 @@ impl Default for TranscriptionProvider {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RecordingMode {
     PressAndHold,
@@ -28,7 +28,7 @@ impl Default for RecordingMode {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HotkeyTrigger {
     LeftOption,
@@ -46,7 +46,7 @@ impl Default for HotkeyTrigger {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AppConfig {
     pub provider: TranscriptionProvider,
     pub recording_mode: RecordingMode,
@@ -87,5 +87,28 @@ impl Default for AppConfig {
             local_whisper_model_path: None,
             input_device: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_provider_is_openai() {
+        assert_eq!(TranscriptionProvider::default(), TranscriptionProvider::OpenAI);
+    }
+
+    #[test]
+    fn default_recording_mode_is_press_and_hold() {
+        assert_eq!(RecordingMode::default(), RecordingMode::PressAndHold);
+    }
+
+    #[test]
+    fn app_config_serde_roundtrip() {
+        let original = AppConfig::default();
+        let json = serde_json::to_string(&original).expect("serialize");
+        let recovered: AppConfig = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(original, recovered);
     }
 }
