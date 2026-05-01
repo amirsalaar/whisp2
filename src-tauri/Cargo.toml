@@ -117,10 +117,6 @@ tempfile = "3"
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS-specific only
 
-[dev-dependencies]
-tokio = { version = "1", features = ["rt", "macros"] }
-tempfile = "3"
-
 [profile.dev]
 opt-level = 0
 debug = true
