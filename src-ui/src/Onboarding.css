@@ -29,10 +29,12 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 0 40px;
+  padding: 12px 40px 0;
   position: relative;
-  overflow: hidden;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
+.ob-body::-webkit-scrollbar { width: 0; }
 
 /* ── Step animation ── */
 .ob-step {
@@ -218,22 +220,22 @@
 
 /* ── Hotkey radio ── */
 .ob-hotkeys {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   width: 100%;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
 }
 .ob-hotkey-opt {
   -webkit-appearance: none;
   appearance: none;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 11px 13px;
+  gap: 12px;
+  padding: 9px 13px;
   border-radius: 9px;
-  border: 1.5px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.05);
+  border: 1.5px solid rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.04);
   color: #f0ede8;
   cursor: pointer;
   text-align: left;
@@ -241,33 +243,33 @@
   font-family: inherit;
 }
 .ob-hotkey-opt:hover {
-  background: rgba(255,255,255,0.09);
-  border-color: rgba(255,255,255,0.15);
+  background: rgba(255,255,255,0.08);
+  border-color: rgba(255,255,255,0.13);
 }
 .ob-hotkey-opt.selected {
   border-color: #e8a928;
-  background: rgba(232,169,40,0.1);
+  background: rgba(232,169,40,0.09);
 }
 .ob-hotkey-glyph {
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 6px;
-  background: rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.07);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
+  font-size: 13px;
   flex-shrink: 0;
-  color: #f0ede8;
-  transition: background 0.12s;
+  color: rgba(240,237,232,0.7);
+  transition: background 0.12s, color 0.12s;
 }
 .ob-hotkey-opt.selected .ob-hotkey-glyph {
-  background: rgba(232,169,40,0.2);
+  background: rgba(232,169,40,0.18);
   color: #e8a928;
 }
 .ob-hotkey-label {
-  font-size: 12.5px;
-  color: rgba(240,237,232,0.75);
+  font-size: 13px;
+  color: rgba(240,237,232,0.78);
   line-height: 1.3;
 }
 
