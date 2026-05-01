@@ -7,8 +7,7 @@ NPM   = npm --prefix src-ui
 
 # Start the full Tauri dev session (frontend + Rust hot-reload)
 dev:
-	$(NPM) run dev &
-	$(CARGO) tauri dev
+	RUST_LOG=whisp_rs=debug $(CARGO) tauri dev
 
 # Production build (.app bundle in src-tauri/target/release/bundle/)
 build:
