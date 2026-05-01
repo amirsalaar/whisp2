@@ -97,7 +97,7 @@ pub fn open_accessibility_settings() {
     let _ = std::process::Command::new("open").arg(url).spawn();
 }
 
-/// Returns true if Input Monitoring permission is granted.
+/// Returns true if Input Monitoring permission is granted via CGPreflightListenEventAccess().
 #[cfg(target_os = "macos")]
 pub fn has_input_monitoring() -> bool {
     #[link(name = "CoreGraphics", kind = "framework")]
