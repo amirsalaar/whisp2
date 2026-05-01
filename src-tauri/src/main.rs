@@ -13,11 +13,10 @@ use tauri::{
 };
 
 use whisp_rs_lib::{
-    commands::{audio::*, config::*, dictionary::*, history::*, hud::*, model_download::*, permissions::*},
+    commands::{audio::*, config::*, dictionary::*, history::*, model_download::*, permissions::*},
     config::persistence,
     history::store,
     hotkey::{event_tap, mode::{HotkeyEvent, RecordingCommand}},
-    hud::panel,
     permissions,
     spawn_tasks, AppState,
 };
@@ -31,15 +30,12 @@ async fn main() {
         )
         .init();
 
-    // Load config
     let config = persistence::load().unwrap_or_default();
 
-    // Determine database path
     let db_path = persistence::app_support_dir()
         .expect("cannot determine app support dir")
         .join("history.db");
 
-    // Open SQLite database
     let db_options = SqliteConnectOptions::new()
         .filename(&db_path)
         .create_if_missing(true);
@@ -52,20 +48,17 @@ async fn main() {
         .await
         .expect("failed to create history schema");
 
-    // Recording command channel — cmd_tx stored in AppState so HUD commands can use it
     let (cmd_tx, cmd_rx) = tokio::sync::mpsc::channel::<RecordingCommand>(8);
 
     let app_state = AppState {
         config: Arc::new(RwLock::new(config)),
         db: db.clone(),
-        // Mask starts at 0; event_tap::install() sets the real value in setup.
         hotkey_mask: Arc::new(AtomicU64::new(0)),
         whisper_ctx: Arc::new(TokioMutex::new((None, None))),
         download_abort: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         recording_cmd_tx: cmd_tx,
     };
 
-    // Channel for CGEventTap → hotkey task
     let (hotkey_tx, hotkey_rx) = mpsc::sync_channel::<HotkeyEvent>(64);
     let hotkey = app_state.config.read().unwrap().hotkey.clone();
 
@@ -101,13 +94,10 @@ async fn main() {
             download_whisper_model,
             abort_model_download,
             list_audio_input_devices,
-            hud_cancel_recording,
-            hud_stop_recording,
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
 
-            // Create tray icon
             let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
             let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings_item, &quit])?;
@@ -142,11 +132,6 @@ async fn main() {
                 })
                 .build(app)?;
 
-            // Create the floating HUD panel (must be on main thread)
-            panel::create(app.handle());
-
-            // Install CGEventTap (requires Accessibility permission).
-            // Pass state_arc.hotkey_mask so the tap and set_config share the same Arc.
             if permissions::has_accessibility() {
                 if !permissions::has_input_monitoring() {
                     tracing::warn!(
@@ -168,10 +153,8 @@ async fn main() {
                 );
             }
 
-            // Spawn all async background tasks
             spawn_tasks(app_handle, state_arc.clone(), hotkey_rx, cmd_rx);
 
-            // Show settings on first launch if no API key / model is configured
             {
                 use whisp_rs_lib::config::models::TranscriptionProvider;
                 let config_snapshot = state_arc.config.read().unwrap().clone();

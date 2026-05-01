@@ -21,7 +21,6 @@ pub fn start_recording(device_name: Option<String>) -> Result<(mpsc::Sender<()>,
     let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
     let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<f32>>(1);
 
-    // Capture the handle here, where a tokio runtime is active.
     let rt = tokio::runtime::Handle::current();
 
     std::thread::spawn(move || {
@@ -86,7 +85,6 @@ fn record_until_stop(
 
     stream.play()?;
 
-    // Block until stop signal using the handle passed from the async caller.
     rt.block_on(async { stop_rx.recv().await });
 
     drop(stream);
@@ -116,8 +114,6 @@ fn record_until_stop(
     Ok(())
 }
 
-/// Builds an input stream using the device's native sample format,
-/// converting each sample to f32 and mixing to mono before appending.
 fn build_input_stream(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
@@ -161,7 +157,6 @@ fn build_input_stream(
                 None,
             )?
         }
-        // cpal 0.15 also has I8/U8/I32/F64 on some backends; handle generically
         _ => {
             tracing::warn!("unhandled sample format {:?}, attempting f32 fallback", sample_format);
             device.build_input_stream(

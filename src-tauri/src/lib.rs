@@ -14,7 +14,6 @@ pub mod config;
 pub mod correction;
 pub mod history;
 pub mod hotkey;
-pub mod hud;
 pub mod injection;
 pub mod keychain;
 pub mod permissions;
@@ -24,15 +23,9 @@ pub mod transcription;
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
     pub db: sqlx::SqlitePool,
-    /// Shared atomic holding the current CGEventTap device mask.
-    /// Updating this at runtime changes the active hotkey without restarting.
     pub hotkey_mask: Arc<AtomicU64>,
-    /// Cached local Whisper context: (loaded_model_path, context).
-    /// Shared with manager::transcribe and commands::set_config.
     pub whisper_ctx: crate::transcription::providers::local_whisper::WhisperCtxCache,
-    /// Set to true to abort an in-progress model download.
     pub download_abort: Arc<AtomicBool>,
-    /// Channel for HUD buttons (cancel/stop) to send commands into the audio pipeline.
     pub recording_cmd_tx: mpsc::Sender<RecordingCommand>,
 }
 
@@ -45,18 +38,11 @@ pub fn spawn_tasks(
 ) {
     let rt = tokio::runtime::Handle::current();
 
-    // Channels — cmd_tx/rx created in main.rs and passed in so AppState can hold cmd_tx
     let mut cmd_rx = cmd_rx;
-    let (state_tx, mut state_rx) = mpsc::channel::<RecordingState>(8);
-    let (proximity_tx, mut proximity_rx) = mpsc::channel::<bool>(4);
-    // (text, source_app) — source_app used for app-aware injection delay
     let (text_tx, mut text_rx) = mpsc::channel::<(String, Option<String>)>(8);
-    // Reset channel: audio/transcription tasks notify hotkey_task when processing is done
-    // so it can return to Idle and accept the next hotkey press.
     let (reset_tx, mut reset_rx) = mpsc::channel::<()>(8);
 
-    // Bridge the std::sync::mpsc receiver (from CGEventTap callback) into
-    // a tokio channel so the hotkey_task can await events without blocking.
+    // Bridge std::sync::mpsc (CGEventTap) into tokio channel.
     let (async_hk_tx, mut async_hk_rx) = mpsc::channel::<HotkeyEvent>(64);
     std::thread::spawn(move || {
         while let Ok(event) = hotkey_rx.recv() {
@@ -67,17 +53,15 @@ pub fn spawn_tasks(
     });
 
     // --- hotkey_task ---
-    // Listens for both CGEventTap events (via async_hk_rx) AND reset signals
-    // (via reset_rx) so it can return to Idle after each transcription cycle.
     let cmd_tx_hk = state.recording_cmd_tx.clone();
-    let state_tx_hk = state_tx.clone();
     let state_hk = Arc::clone(&state);
+    let ah_hk = app_handle.clone();
     rt.spawn(async move {
         let mut current = RecordingState::Idle;
+        let mut tray_anim_abort: Option<tokio::task::AbortHandle> = None;
 
         loop {
             let new_state = tokio::select! {
-                // Hotkey event from CGEventTap
                 maybe_event = async_hk_rx.recv() => {
                     let event = match maybe_event {
                         Some(e) => e,
@@ -110,7 +94,6 @@ pub fn spawn_tasks(
                         _ => current.clone(),
                     }
                 }
-                // Reset signal from audio/transcription — return to Idle
                 maybe_reset = reset_rx.recv() => {
                     if maybe_reset.is_none() { break; }
                     RecordingState::Idle
@@ -119,13 +102,12 @@ pub fn spawn_tasks(
 
             if new_state != current {
                 current = new_state.clone();
-                let _ = state_tx_hk.send(current.clone()).await;
+                update_tray_icon(&ah_hk, &current, &mut tray_anim_abort);
             }
         }
     });
 
     // --- audio_task ---
-    let state_tx_audio = state_tx.clone();
     let text_tx_audio = text_tx.clone();
     let reset_tx_audio = reset_tx.clone();
     let state_arc = Arc::clone(&state);
@@ -136,8 +118,7 @@ pub fn spawn_tasks(
         let mut source_app: Option<String> = None;
 
         loop {
-            let cmd = cmd_rx.recv().await;
-            match cmd {
+            match cmd_rx.recv().await {
                 Some(RecordingCommand::Start(bundle_id)) => {
                     source_app = bundle_id;
                     let input_device = state_arc.config.read().unwrap().input_device.clone();
@@ -150,23 +131,17 @@ pub fn spawn_tasks(
                         }
                         Err(e) => {
                             tracing::error!("failed to start recording: {}", e);
-                            let _ = state_tx_audio.send(RecordingState::Idle).await;
                             let _ = reset_tx_audio.send(()).await;
                         }
                     }
                 }
                 Some(RecordingCommand::Stop) => {
-                    if let Some(tx) = stop_tx.take() {
-                        drop(tx); // signal stop
-                    }
-                    if let Some(vol) = saved_vol.take() {
-                        audio::volume::restore(vol);
-                    }
+                    if let Some(tx) = stop_tx.take() { drop(tx); }
+                    if let Some(vol) = saved_vol.take() { audio::volume::restore(vol); }
                     if let Some(mut rx) = pcm_rx.take() {
                         let config = state_arc.config.read().unwrap().clone();
                         let db = state_arc.db.clone();
                         let text_tx = text_tx_audio.clone();
-                        let state_tx = state_tx_audio.clone();
                         let reset_tx = reset_tx_audio.clone();
                         let app_id = source_app.take();
                         let whisper_ctx = Arc::clone(&state_arc.whisper_ctx);
@@ -184,10 +159,7 @@ pub fn spawn_tasks(
                                                     if config.save_history {
                                                         let provider_name = format!("{:?}", config.provider);
                                                         if let Err(e) = crate::history::store::insert(
-                                                            &db,
-                                                            &text,
-                                                            app_id.as_deref(),
-                                                            &provider_name,
+                                                            &db, &text, app_id.as_deref(), &provider_name,
                                                         ).await {
                                                             tracing::warn!("history insert failed: {}", e);
                                                         } else if let Some(max) = config.max_history_entries {
@@ -197,29 +169,22 @@ pub fn spawn_tasks(
                                                         }
                                                     }
                                                     let _ = text_tx.send((text, app_id)).await;
-                                                    let _ = state_tx.send(RecordingState::Idle).await;
-                                                    // Reset hotkey_task state machine → Idle
                                                     let _ = reset_tx.send(()).await;
                                                 }
                                                 Err(e) => {
                                                     tracing::error!("transcription failed: {}", e);
-                                                    let _ = state_tx.send(RecordingState::Error(e.to_string())).await;
-                                                    // Error state auto-resets after 2s via hud_task;
-                                                    // reset hotkey_task immediately so next press works.
                                                     let _ = reset_tx.send(()).await;
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             tracing::error!("WAV encode failed: {}", e);
-                                            let _ = state_tx.send(RecordingState::Error(e.to_string())).await;
                                             let _ = reset_tx.send(()).await;
                                         }
                                     }
                                 }
                                 _ => {
                                     tracing::warn!("no audio captured");
-                                    let _ = state_tx.send(RecordingState::Idle).await;
                                     let _ = reset_tx.send(()).await;
                                 }
                             }
@@ -230,70 +195,7 @@ pub fn spawn_tasks(
                     stop_tx.take();
                     pcm_rx.take();
                     source_app.take();
-                    // Also reset hotkey_task if a cancel comes through
                     let _ = reset_tx_audio.send(()).await;
-                }
-            }
-        }
-    });
-
-    // Start global mouse-moved monitor for proximity-based pill expand/collapse
-    hud::panel::start_proximity_monitor(app_handle.clone(), proximity_tx);
-
-    // --- hud_task ---
-    let ah_hud = app_handle.clone();
-    let state_hud = Arc::clone(&state);
-    let state_tx_hud = state_tx.clone();
-    rt.spawn(async move {
-        // Emit initial collapsed-idle so the pill appears immediately at launch.
-        hud::panel::update(&ah_hud, hud::panel::HudState::CollapsedIdle);
-
-        loop {
-            tokio::select! {
-                maybe_s = state_rx.recv() => {
-                    let s = match maybe_s {
-                        Some(s) => s,
-                        None => break,
-                    };
-                    let show_hud = state_hud.config.read().unwrap().show_hud;
-                    let mode = state_hud.config.read().unwrap().recording_mode.clone();
-                    match &s {
-                        RecordingState::Error(_msg) => {
-                            // Hide HUD immediately on error (tray tooltip shows the message)
-                            let ah_err = ah_hud.clone();
-                            hud::panel::update(&ah_err, hud::panel::HudState::Hidden);
-                            let state_tx = state_tx_hud.clone();
-                            let ah = ah_hud.clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                                let _ = state_tx.send(RecordingState::Idle).await;
-                                hud::panel::update(&ah, hud::panel::HudState::Hidden);
-                            });
-                        }
-                        other => {
-                            let hud_state = if !show_hud {
-                                hud::panel::HudState::Hidden
-                            } else {
-                                match other {
-                                    RecordingState::Idle => hud::panel::HudState::CollapsedIdle,
-                                    RecordingState::Recording => match mode {
-                                        RecordingMode::PressAndHold => hud::panel::HudState::ShortcutListening,
-                                        RecordingMode::Toggle => hud::panel::HudState::RecordingControls,
-                                    },
-                                    RecordingState::Processing => hud::panel::HudState::Processing,
-                                    RecordingState::Error(_) => unreachable!(),
-                                }
-                            };
-                            hud::panel::update(&ah_hud, hud_state);
-                        }
-                    }
-                    update_tray_icon(&ah_hud, &s);
-                }
-                maybe_near = proximity_rx.recv() => {
-                    // Drain proximity events — expand/collapse is owned by JS
-                    // mouseenter/mouseleave. Global NSEvent monitors don't fire
-                    // when the cursor is inside our own window.
-                    if maybe_near.is_none() { break; }
                 }
             }
         }
@@ -321,47 +223,150 @@ pub fn spawn_tasks(
     });
 }
 
-fn update_tray_icon(app: &tauri::AppHandle, state: &RecordingState) {
-    let tooltip = match state {
-        RecordingState::Idle => "Whisp",
-        RecordingState::Recording => "Whisp — Recording",
-        RecordingState::Processing => "Whisp — Processing",
-        RecordingState::Error(_) => "Whisp — Error",
-    };
-
-    // 22x22 RGBA icon: different fill color per state
-    // Idle: grey, Recording: red, Processing: yellow, Error: orange
-    let (fg_r, fg_g, fg_b) = match state {
-        RecordingState::Idle => (200u8, 200u8, 200u8),
-        RecordingState::Recording => (230u8, 50u8, 50u8),
-        RecordingState::Processing => (230u8, 180u8, 50u8),
-        RecordingState::Error(_) => (230u8, 100u8, 30u8),
-    };
-
-    let size: u32 = 22;
-    let cx = size as f32 / 2.0;
-    let radius = (size as f32 / 2.0) - 1.5;
+fn render_mic_icon(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
+    let cx = size as f32 / 2.0;
+    let cap_w = 6.0f32;
+    let cap_h = 9.0f32;
+    let cap_top = cx - cap_h / 2.0 - 1.0;
+    let cap_bot = cap_top + cap_h;
+    let cap_l = cx - cap_w / 2.0;
+    let cap_r = cx + cap_w / 2.0;
+    let corner = cap_w / 2.0;
+
     for y in 0..size {
         for x in 0..size {
-            let dx = x as f32 - cx + 0.5;
-            let dy = y as f32 - cx + 0.5;
-            let dist = (dx * dx + dy * dy).sqrt();
+            let fx = x as f32 + 0.5;
+            let fy = y as f32 + 0.5;
             let idx = ((y * size + x) * 4) as usize;
-            if dist <= radius {
-                pixels[idx] = fg_r;
-                pixels[idx + 1] = fg_g;
-                pixels[idx + 2] = fg_b;
-                pixels[idx + 3] = 220;
-            } else {
-                pixels[idx + 3] = 0; // transparent
+
+            let in_capsule = {
+                let in_rect = fx >= cap_l && fx <= cap_r && fy >= cap_top && fy <= cap_bot;
+                let top_l = ((fx - (cap_l + corner)).powi(2) + (fy - (cap_top + corner)).powi(2)).sqrt() <= corner;
+                let top_r = ((fx - (cap_r - corner)).powi(2) + (fy - (cap_top + corner)).powi(2)).sqrt() <= corner;
+                in_rect || (fy < cap_top + corner && (top_l || top_r))
+            };
+            let stand_x = (fx - cx).abs() < 0.75;
+            let stand_y = fy > cap_bot && fy < cap_bot + 4.0;
+            let base_y = (fy - (cap_bot + 4.0)).abs() < 0.75;
+            let base_x = (fx - cx).abs() < 2.5;
+            let arc_r = cap_w / 2.0 + 1.0;
+            let arc_dist = ((fx - cx).powi(2) + (fy - (cap_bot - 0.5)).powi(2)).sqrt();
+            let on_arc = (arc_dist - arc_r).abs() < 0.9 && fy >= cap_bot - 0.5;
+
+            if in_capsule || stand_x && stand_y || base_y && base_x || on_arc {
+                pixels[idx] = r;
+                pixels[idx + 1] = g;
+                pixels[idx + 2] = b;
+                pixels[idx + 3] = alpha;
             }
         }
     }
+    pixels
+}
 
+fn render_equalizer_frame(size: u32, t: f32, r: u8, g: u8, b: u8) -> Vec<u8> {
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    let n_bars: usize = 5;
+    let bar_w = 2u32;
+    let gap = 1u32;
+    let total_w = n_bars as u32 * bar_w + (n_bars as u32 - 1) * gap;
+    let start_x = (size - total_w) / 2;
+    let max_h = 14u32;
+    let min_h = 3u32;
+    let base_y = size - 4;
+    let phases = [0.0f32, 0.8, 1.6, 2.4, 3.2];
+    let speeds = [7.0f32, 5.5, 8.5, 6.0, 9.0];
+
+    for i in 0..n_bars {
+        let raw = ((t * speeds[i] + phases[i]).sin() + 1.0) / 2.0;
+        let h = (min_h as f32 + raw * (max_h - min_h) as f32).round() as u32;
+        let bx = start_x + i as u32 * (bar_w + gap);
+        for px in bx..(bx + bar_w) {
+            for py in (base_y - h)..base_y {
+                if px < size && py < size {
+                    let idx = ((py * size + px) * 4) as usize;
+                    let fade = 1.0 - (base_y - py) as f32 / h as f32 * 0.25;
+                    pixels[idx] = r;
+                    pixels[idx + 1] = g;
+                    pixels[idx + 2] = b;
+                    pixels[idx + 3] = (220.0 * fade) as u8;
+                }
+            }
+        }
+    }
+    pixels
+}
+
+fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    let cx = size as f32 / 2.0;
+    let radius = size as f32 / 2.0 - 2.5;
+    let thickness = 2.0f32;
+    for y in 0..size {
+        for x in 0..size {
+            let fx = x as f32 + 0.5 - cx;
+            let fy = y as f32 + 0.5 - cx;
+            let dist = (fx * fx + fy * fy).sqrt();
+            if (dist - radius).abs() <= thickness / 2.0 {
+                let angle = fy.atan2(fx);
+                let skip = angle > -std::f32::consts::FRAC_PI_2 && angle < 0.3;
+                if !skip {
+                    let idx = ((y * size + x) * 4) as usize;
+                    pixels[idx] = r;
+                    pixels[idx + 1] = g;
+                    pixels[idx + 2] = b;
+                    pixels[idx + 3] = 200;
+                }
+            }
+        }
+    }
+    pixels
+}
+
+fn set_tray(app: &tauri::AppHandle, tooltip: &str, pixels: Vec<u8>, size: u32) {
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(tooltip));
         let img = tauri::image::Image::new_owned(pixels, size, size);
         let _ = tray.set_icon(Some(img));
+    }
+}
+
+fn update_tray_icon(
+    app: &tauri::AppHandle,
+    state: &RecordingState,
+    anim_abort: &mut Option<tokio::task::AbortHandle>,
+) {
+    if let Some(h) = anim_abort.take() { h.abort(); }
+
+    match state {
+        RecordingState::Recording => {
+            // --danger: #c0392b → rgb(192, 57, 43)
+            let app = app.clone();
+            let handle = tokio::spawn(async move {
+                let mut t = 0.0f32;
+                let mut interval = tokio::time::interval(
+                    std::time::Duration::from_millis(1000 / 12)
+                );
+                loop {
+                    interval.tick().await;
+                    set_tray(&app, "Whisp — Recording", render_equalizer_frame(22, t, 192, 57, 43), 22);
+                    t += 1.0 / 12.0;
+                }
+            });
+            *anim_abort = Some(handle.abort_handle());
+        }
+        RecordingState::Idle => {
+            // --text-muted: #8a8580 → rgb(138, 133, 128)
+            set_tray(app, "Whisp", render_mic_icon(22, 138, 133, 128, 200), 22);
+        }
+        RecordingState::Processing => {
+            // --warning-border: #e8a928 → rgb(232, 169, 40)
+            set_tray(app, "Whisp — Processing", render_spinner_icon(22, 232, 169, 40), 22);
+        }
+        RecordingState::Error(_) => {
+            // --danger: #c0392b → rgb(192, 57, 43)
+            set_tray(app, "Whisp — Error", render_mic_icon(22, 192, 57, 43, 220), 22);
+        }
     }
 }
