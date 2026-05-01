@@ -298,12 +298,12 @@ export default function App() {
       {/* ── Sidebar ── */}
       <nav className="sidebar">
         <div className="brand">
-          <svg className="brand-icon" width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-            <rect x="0.5"  y="7.5" width="2.5" height="5"   rx="1.25" fill="currentColor" opacity="0.5"/>
-            <rect x="4"    y="5"   width="2.5" height="9"   rx="1.25" fill="currentColor" opacity="0.75"/>
-            <rect x="7.75" y="2"   width="2.5" height="14"  rx="1.25" fill="currentColor" opacity="1"/>
-            <rect x="11.5" y="5"   width="2.5" height="9"   rx="1.25" fill="currentColor" opacity="0.75"/>
-            <rect x="15"   y="7.5" width="2.5" height="5"   rx="1.25" fill="currentColor" opacity="0.5"/>
+          <svg className="brand-icon" width="22" height="22" viewBox="0 0 22 22" xmlns="http://www.w3.org/2000/svg">
+            <rect x="4"  y="14" width="2" height="5"  rx="1" fill="currentColor"/>
+            <rect x="7"  y="9"  width="2" height="10" rx="1" fill="currentColor"/>
+            <rect x="10" y="3"  width="2" height="16" rx="1" fill="currentColor"/>
+            <rect x="13" y="9"  width="2" height="10" rx="1" fill="currentColor"/>
+            <rect x="16" y="14" width="2" height="5"  rx="1" fill="currentColor"/>
           </svg>
           <span className="brand-name">Whisp</span>
         </div>

@@ -225,20 +225,19 @@ pub fn spawn_tasks(
 
 fn render_waveform_idle(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
-    // Same bell-curve proportions as the animated equalizer, but static at base heights.
-    let base_heights = [5.0f32, 10.0, 16.0, 10.0, 5.0];
+    // Mirrors the sidebar SVG: 5 bars bottom-aligned, bell-curve heights.
+    // Heights (px in 22px canvas): short=5, mid=10, tall=16, mid=10, short=5.
+    // Bar x-offsets: 4, 7, 10, 13, 16 — each 2px wide with 1px gap.
+    let bar_xs: [u32; 5] = [4, 7, 10, 13, 16];
+    let bar_heights: [u32; 5] = [5, 10, 16, 10, 5];
     let bar_w = 2u32;
-    let gap = 1u32;
-    let n_bars = base_heights.len() as u32;
-    let total_w = n_bars * bar_w + (n_bars - 1) * gap;
-    let start_x = (size - total_w) / 2;
-    let base_y = size - 3;
+    let base_y = size - 3; // bottom anchor
 
-    for (i, &base_h) in base_heights.iter().enumerate() {
-        let h = base_h.round() as u32;
-        let bx = start_x + i as u32 * (bar_w + gap);
+    for (i, &bx) in bar_xs.iter().enumerate() {
+        let h = bar_heights[i];
+        let top_y = base_y.saturating_sub(h);
         for px in bx..(bx + bar_w) {
-            for py in (base_y - h)..base_y {
+            for py in top_y..base_y {
                 if px < size && py < size {
                     let idx = ((py * size + px) * 4) as usize;
                     pixels[idx] = r;
@@ -358,7 +357,7 @@ fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
 /// Sets the tray icon to the idle waveform immediately. Call this right after the
 /// tray is built in `main.rs` so the waveform replaces the default `.png` icon at launch.
 pub fn set_idle_tray_icon(app: &tauri::AppHandle) {
-    set_tray(app, "Whisp", render_waveform_idle(22, 138, 133, 128, 200), 22);
+    set_tray(app, "Whisp", render_waveform_idle(22, 255, 255, 255, 200), 22);
 }
 
 fn set_tray(app: &tauri::AppHandle, tooltip: &str, pixels: Vec<u8>, size: u32) {
@@ -394,8 +393,8 @@ fn update_tray_icon(
             *anim_abort = Some(handle.abort_handle());
         }
         RecordingState::Idle => {
-            // --text-muted: #8a8580 → rgb(138, 133, 128)
-            set_tray(app, "Whisp", render_waveform_idle(22, 138, 133, 128, 200), 22);
+            // White with slight transparency — matches macOS menu bar icon convention
+            set_tray(app, "Whisp", render_waveform_idle(22, 255, 255, 255, 200), 22);
         }
         RecordingState::Processing => {
             // --warning-border: #e8a928 → rgb(232, 169, 40)
