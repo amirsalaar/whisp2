@@ -18,7 +18,7 @@ use whisp_rs_lib::{
     history::store,
     hotkey::{event_tap, mode::{HotkeyEvent, RecordingCommand}},
     permissions,
-    spawn_tasks, AppState,
+    set_idle_tray_icon, spawn_tasks, AppState,
 };
 
 #[tokio::main]
@@ -131,6 +131,9 @@ async fn main() {
                     }
                 })
                 .build(app)?;
+
+            // Override the default .png icon with the waveform bars from the very first frame.
+            set_idle_tray_icon(&app_handle);
 
             if permissions::has_accessibility() {
                 if !permissions::has_input_monitoring() {

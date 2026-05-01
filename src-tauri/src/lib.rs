@@ -223,6 +223,35 @@ pub fn spawn_tasks(
     });
 }
 
+fn render_waveform_idle(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    // Same bell-curve proportions as the animated equalizer, but static at base heights.
+    let base_heights = [5.0f32, 10.0, 16.0, 10.0, 5.0];
+    let bar_w = 2u32;
+    let gap = 1u32;
+    let n_bars = base_heights.len() as u32;
+    let total_w = n_bars * bar_w + (n_bars - 1) * gap;
+    let start_x = (size - total_w) / 2;
+    let base_y = size - 3;
+
+    for (i, &base_h) in base_heights.iter().enumerate() {
+        let h = base_h.round() as u32;
+        let bx = start_x + i as u32 * (bar_w + gap);
+        for px in bx..(bx + bar_w) {
+            for py in (base_y - h)..base_y {
+                if px < size && py < size {
+                    let idx = ((py * size + px) * 4) as usize;
+                    pixels[idx] = r;
+                    pixels[idx + 1] = g;
+                    pixels[idx + 2] = b;
+                    pixels[idx + 3] = alpha;
+                }
+            }
+        }
+    }
+    pixels
+}
+
 fn render_mic_icon(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
     let cx = size as f32 / 2.0;
@@ -326,6 +355,12 @@ fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     pixels
 }
 
+/// Sets the tray icon to the idle waveform immediately. Call this right after the
+/// tray is built in `main.rs` so the waveform replaces the default `.png` icon at launch.
+pub fn set_idle_tray_icon(app: &tauri::AppHandle) {
+    set_tray(app, "Whisp", render_waveform_idle(22, 138, 133, 128, 200), 22);
+}
+
 fn set_tray(app: &tauri::AppHandle, tooltip: &str, pixels: Vec<u8>, size: u32) {
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(tooltip));
@@ -360,7 +395,7 @@ fn update_tray_icon(
         }
         RecordingState::Idle => {
             // --text-muted: #8a8580 → rgb(138, 133, 128)
-            set_tray(app, "Whisp", render_mic_icon(22, 138, 133, 128, 200), 22);
+            set_tray(app, "Whisp", render_waveform_idle(22, 138, 133, 128, 200), 22);
         }
         RecordingState::Processing => {
             // --warning-border: #e8a928 → rgb(232, 169, 40)
@@ -412,5 +447,25 @@ mod tests {
     fn test_spinner_has_pixels() {
         let buf = render_spinner_icon(22, 255, 255, 255);
         assert!(buf.chunks(4).any(|p| p[3] != 0));
+    }
+
+    #[test]
+    fn test_waveform_idle_buffer_size() {
+        let buf = render_waveform_idle(22, 255, 255, 255, 200);
+        assert_eq!(buf.len(), 22 * 22 * 4);
+    }
+
+    #[test]
+    fn test_waveform_idle_has_pixels() {
+        let buf = render_waveform_idle(22, 255, 255, 255, 200);
+        assert!(buf.chunks(4).any(|p| p[3] != 0));
+    }
+
+    #[test]
+    fn test_waveform_idle_is_static() {
+        // render_waveform_idle has no time parameter — calling twice gives identical output
+        let a = render_waveform_idle(22, 100, 100, 100, 200);
+        let b = render_waveform_idle(22, 100, 100, 100, 200);
+        assert_eq!(a, b);
     }
 }
