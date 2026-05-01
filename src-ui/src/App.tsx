@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import "./App.css";
+import Onboarding from "./Onboarding";
 
 interface AppConfig {
   provider: "open_a_i" | "groq" | "gemini" | "local_whisper";
@@ -106,6 +107,7 @@ function IconShield() {
 }
 
 export default function App() {
+  const [showOnboarding, setShowOnboarding] = useState(false);
   const [tab, setTab] = useState<Tab>("settings");
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [openaiKey, setOpenaiKey] = useState("");
@@ -146,6 +148,9 @@ export default function App() {
   }
 
   useEffect(() => {
+    if (localStorage.getItem("whisp_onboarding_done") !== "1") {
+      setShowOnboarding(true);
+    }
     invoke<AppConfig>("get_config").then(setConfig);
     refreshPermissions();
     invoke<string | null>("get_api_key", { keyName: "openai_api_key" }).then(
@@ -268,6 +273,18 @@ export default function App() {
   async function deleteEntry(id: string) {
     await invoke("delete_history_entry", { id });
     setHistory((h) => h.filter((e) => e.id !== id));
+  }
+
+  if (showOnboarding) {
+    return (
+      <Onboarding
+        onComplete={() => {
+          localStorage.setItem("whisp_onboarding_done", "1");
+          setShowOnboarding(false);
+          invoke<AppConfig>("get_config").then(setConfig);
+        }}
+      />
+    );
   }
 
   if (!config) return <div className="loading">Loading…</div>;

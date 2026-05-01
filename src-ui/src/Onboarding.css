@@ -1,0 +1,347 @@
+.ob-shell {
+  position: fixed;
+  inset: 0;
+  background: #1a1917;
+  display: flex;
+  flex-direction: column;
+  font-family: "Geist", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  color: #f0ede8;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+/* ── Progress bar ── */
+.ob-progress {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  flex-shrink: 0;
+}
+.ob-progress-fill {
+  height: 100%;
+  background: #e8a928;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Step container ── */
+.ob-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0 40px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── Step animation ── */
+.ob-step {
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: ob-enter 0.32s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+@keyframes ob-enter {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Headings ── */
+.ob-icon {
+  margin-bottom: 20px;
+  opacity: 0.92;
+}
+.ob-title {
+  font-family: "DM Serif Display", Georgia, serif;
+  font-size: 28px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin: 0 0 10px;
+  color: #f0ede8;
+}
+.ob-subtitle {
+  font-size: 14px;
+  line-height: 1.55;
+  color: rgba(240,237,232,0.6);
+  margin: 0 0 28px;
+  max-width: 360px;
+}
+
+/* ── Engine cards ── */
+.ob-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 28px;
+}
+.ob-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, background 0.15s;
+}
+.ob-card:hover {
+  background: rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.15);
+}
+.ob-card.selected {
+  border-color: #e8a928;
+  background: rgba(232,169,40,0.08);
+}
+.ob-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255,255,255,0.3);
+  flex-shrink: 0;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ob-card.selected .ob-card-dot {
+  background: #e8a928;
+  border-color: #e8a928;
+}
+.ob-card-body {
+  flex: 1;
+}
+.ob-card-title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: #f0ede8;
+  margin-bottom: 1px;
+}
+.ob-card-desc {
+  font-size: 12px;
+  color: rgba(240,237,232,0.48);
+}
+.ob-card-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-weight: 500;
+}
+.ob-tag-free { background: rgba(26,138,61,0.25); color: #4ecf7e; }
+.ob-tag-fast { background: rgba(99,162,255,0.2); color: #7ab9ff; }
+.ob-tag-local { background: rgba(232,169,40,0.2); color: #e8c84a; }
+
+/* ── Key input ── */
+.ob-key-wrap {
+  width: 100%;
+  margin-bottom: 28px;
+}
+.ob-key-label {
+  font-size: 12px;
+  color: rgba(240,237,232,0.5);
+  margin-bottom: 8px;
+  text-align: left;
+}
+.ob-key-row {
+  display: flex;
+  gap: 8px;
+}
+.ob-key-input {
+  flex: 1;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #f0ede8;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.ob-key-input:focus { border-color: rgba(255,255,255,0.28); }
+.ob-key-input::placeholder { color: rgba(240,237,232,0.28); }
+.ob-key-saved {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #4ecf7e;
+  margin-top: 8px;
+  animation: ob-enter 0.25s ease both;
+}
+
+/* ── Model picker ── */
+.ob-model-select {
+  width: 100%;
+  background: rgba(255,255,255,0.06);
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 10px 14px;
+  color: #f0ede8;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  cursor: pointer;
+  margin-bottom: 12px;
+  appearance: none;
+}
+.ob-model-select option { background: #1a1917; }
+.ob-dl-progress {
+  width: 100%;
+  margin-bottom: 28px;
+}
+.ob-dl-bar {
+  height: 4px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.ob-dl-fill {
+  height: 100%;
+  background: #e8a928;
+  border-radius: 2px;
+  transition: width 0.2s ease;
+}
+.ob-dl-meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: rgba(240,237,232,0.45);
+}
+
+/* ── Hotkey radio ── */
+.ob-hotkeys {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 20px;
+}
+.ob-hotkey-opt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1.5px solid rgba(255,255,255,0.06);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.ob-hotkey-opt:hover { background: rgba(255,255,255,0.04); }
+.ob-hotkey-opt.selected {
+  border-color: #e8a928;
+  background: rgba(232,169,40,0.07);
+}
+.ob-hotkey-key {
+  font-size: 16px;
+  width: 28px;
+  text-align: center;
+}
+.ob-hotkey-label {
+  font-size: 13px;
+  color: rgba(240,237,232,0.8);
+}
+
+/* ── Permission status ── */
+.ob-perm-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1.5px solid rgba(255,255,255,0.07);
+  margin-bottom: 10px;
+}
+.ob-perm-label { font-size: 13px; color: rgba(240,237,232,0.8); }
+.ob-perm-granted { font-size: 12px; color: #4ecf7e; font-weight: 500; }
+.ob-perm-missing { font-size: 12px; color: rgba(240,237,232,0.38); }
+.ob-perm-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+/* ── Done summary ── */
+.ob-summary {
+  width: 100%;
+  margin-bottom: 28px;
+}
+.ob-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 11px 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 13px;
+}
+.ob-summary-row:last-child { border-bottom: none; }
+.ob-summary-key { color: rgba(240,237,232,0.5); }
+.ob-summary-val { color: #f0ede8; font-weight: 500; }
+
+/* ── Nav footer ── */
+.ob-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 40px 20px;
+  flex-shrink: 0;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.ob-footer-left { min-width: 80px; }
+.ob-footer-right { min-width: 80px; display: flex; justify-content: flex-end; }
+
+/* ── Buttons ── */
+.ob-btn-primary {
+  background: #e8a928;
+  color: #1a1917;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 22px;
+  font-size: 13.5px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: opacity 0.15s;
+  white-space: nowrap;
+}
+.ob-btn-primary:disabled { opacity: 0.35; cursor: not-allowed; }
+.ob-btn-primary:not(:disabled):hover { opacity: 0.88; }
+.ob-btn-secondary {
+  background: rgba(255,255,255,0.08);
+  color: #f0ede8;
+  border: 1.5px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.ob-btn-secondary:hover { background: rgba(255,255,255,0.12); }
+.ob-btn-ghost {
+  background: transparent;
+  color: rgba(240,237,232,0.5);
+  border: none;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 8px 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ob-btn-ghost:hover { color: rgba(240,237,232,0.8); }
+
+/* ── Mic pulse animation (welcome) ── */
+@keyframes ob-pulse {
+  0%, 100% { transform: scale(1); opacity: 0.9; }
+  50% { transform: scale(1.06); opacity: 1; }
+}
+.ob-mic-pulse {
+  animation: ob-pulse 2.4s ease-in-out infinite;
+}
