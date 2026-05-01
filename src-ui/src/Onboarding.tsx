@@ -489,7 +489,7 @@ function HotkeyStep({
       <div className="ob-hotkeys">
         {HOTKEY_OPTS.map((o) => (
           <button key={o.value} className={`ob-hotkey-opt${hotkey === o.value ? " selected" : ""}`} onClick={() => onSelect(o.value)}>
-            <span className="ob-hotkey-key">{o.glyph}</span>
+            <span className="ob-hotkey-glyph">{o.glyph}</span>
             <span className="ob-hotkey-label">{o.label}</span>
           </button>
         ))}
