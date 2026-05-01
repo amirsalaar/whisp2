@@ -299,14 +299,11 @@ export default function App() {
       <nav className="sidebar">
         <div className="brand">
           <svg className="brand-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-            {/* mic capsule */}
-            <rect x="6" y="1.5" width="6" height="9" rx="3" fill="currentColor" opacity="0.9"/>
-            {/* arc */}
-            <path d="M3.5 9.5C3.5 12.538 6.01 15 9 15s5.5-2.462 5.5-5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-            {/* stand */}
-            <line x1="9" y1="15" x2="9" y2="17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            {/* base */}
-            <line x1="6.5" y1="17" x2="11.5" y2="17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            <rect x="1"    y="7"   width="2" height="4"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
+            <rect x="4.5"  y="5"   width="2" height="8"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
+            <rect x="8"    y="2.5" width="2" height="13" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+            <rect x="11.5" y="5"   width="2" height="8"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
+            <rect x="15"   y="7"   width="2" height="4"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
           </svg>
           <span className="brand-name">Whisp</span>
         </div>
