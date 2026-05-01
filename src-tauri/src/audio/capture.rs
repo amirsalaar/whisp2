@@ -202,7 +202,6 @@ fn resample_mono(input: Vec<f32>, from: u32, to: u32) -> Result<Vec<f32>> {
     Ok(out.into_iter().next().unwrap_or_default())
 }
 
-/// Encodes a mono f32 PCM buffer at 16kHz into a WAV-formatted Vec<u8>.
 pub fn encode_wav(samples: &[f32]) -> Result<Vec<u8>> {
     let mut buf: Vec<u8> = Vec::new();
     let spec = hound::WavSpec {
@@ -219,4 +218,78 @@ pub fn encode_wav(samples: &[f32]) -> Result<Vec<u8>> {
     }
     writer.finalize()?;
     Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn test_encode_wav_roundtrip() {
+        let samples: Vec<f32> = (0..160).map(|i| (i as f32 / 160.0) * 2.0 - 1.0).collect();
+        let bytes = encode_wav(&samples).unwrap();
+        let cursor = std::io::Cursor::new(&bytes);
+        let reader = hound::WavReader::new(cursor).unwrap();
+        let spec = reader.spec();
+        assert_eq!(spec.sample_rate, 16000);
+        assert_eq!(spec.channels, 1);
+        assert_eq!(reader.len(), samples.len() as u32);
+    }
+
+    #[test]
+    fn test_encode_wav_empty() {
+        let bytes = encode_wav(&[]).unwrap();
+        let cursor = std::io::Cursor::new(&bytes);
+        let reader = hound::WavReader::new(cursor).unwrap();
+        assert_eq!(reader.spec().sample_rate, 16000);
+        assert_eq!(reader.len(), 0);
+    }
+
+    #[test]
+    fn test_resample_mono_length() {
+        let input = vec![0.0f32; 44100];
+        let output = resample_mono(input, 44100, 16000).unwrap();
+        let expected = 16000usize;
+        let tolerance = (expected as f32 * 0.05) as usize;
+        assert!(
+            output.len().abs_diff(expected) <= tolerance,
+            "output len {} not within 5% of {}",
+            output.len(),
+            expected
+        );
+    }
+
+    #[test]
+    fn test_resample_mono_same_rate() {
+        let input: Vec<f32> = (0..16000).map(|i| (i as f32).sin()).collect();
+        let output = resample_mono(input.clone(), 16000, 16000).unwrap();
+        let tolerance = (input.len() as f32 * 0.05) as usize;
+        assert!(
+            output.len().abs_diff(input.len()) <= tolerance,
+            "output len {} not within 5% of {}",
+            output.len(),
+            input.len()
+        );
+    }
+
+    #[test]
+    fn test_push_mono_stereo_mix() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let data = [0.4f32, 0.8f32, -0.2f32, 0.6f32];
+        push_mono_f32(&data, 2, &captured);
+        let result = captured.lock().unwrap().clone();
+        assert_eq!(result.len(), 2);
+        assert!((result[0] - 0.6f32).abs() < 1e-6);
+        assert!((result[1] - 0.2f32).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_push_mono_mono_passthrough() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let data = [0.1f32, 0.5f32, -0.3f32];
+        push_mono_f32(&data, 1, &captured);
+        let result = captured.lock().unwrap().clone();
+        assert_eq!(result, data.to_vec());
+    }
 }
