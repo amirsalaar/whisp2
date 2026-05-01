@@ -289,14 +289,9 @@ jobs:
 
           SIGNING_NOTE=""
           if [[ "$SIGNING_MODE" == "signed" ]]; then
-            SIGNING_NOTE='
-> **Note:** This build is Developer ID–signed but not notarized. If macOS blocks the app on first launch, right-click → **Open**.'
+            SIGNING_NOTE=$(printf '> **Note:** This build is Developer ID-signed but not notarized. If macOS blocks the app on first launch, right-click -> **Open**.')
           elif [[ "$SIGNING_MODE" == "adhoc" ]]; then
-            SIGNING_NOTE='
-> **Note:** This build is ad-hoc signed and not notarized. To bypass Gatekeeper after mounting the DMG:
-> ```
-> xattr -dr com.apple.quarantine /Applications/Whisp2.app
-> ```'
+            SIGNING_NOTE=$(printf '> **Note:** This build is ad-hoc signed and not notarized. To bypass Gatekeeper after mounting the DMG:\n> ```\n> xattr -dr com.apple.quarantine /Applications/Whisp2.app\n> ```')
           fi
 
           {
