@@ -272,6 +272,12 @@ export default function App() {
       setDownloadProgress(e.payload);
     }).then((fn) => unlisteners.push(fn));
 
+    listen<string>("transcription_result", (_e) => {
+      invoke<HistoryEntry[]>("get_history", { limit: 100 }).then((entries) => {
+        setHistory(entries);
+        setTab("history");
+      });
+    }).then((fn) => unlisteners.push(fn));
 
     return () => {
       window.removeEventListener("focus", onFocus);
