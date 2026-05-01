@@ -267,30 +267,32 @@ fn render_mic_icon(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
 
 fn render_equalizer_frame(size: u32, t: f32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
-    let n_bars: usize = 5;
+    // Bell-curve base heights proportional to the app icon logo (short→mid→tall→mid→short).
+    // Scaled from the 18px SVG viewBox to the 22px tray icon.
+    let base_heights = [5.0f32, 10.0, 16.0, 10.0, 5.0];
+    let amplitude = 3.0f32;
+    let phases = [0.0f32, 1.1, 2.3, 0.6, 1.8];
+    let speeds = [6.5f32, 8.0, 7.0, 9.0, 5.5];
+
     let bar_w = 2u32;
     let gap = 1u32;
-    let total_w = n_bars as u32 * bar_w + (n_bars as u32 - 1) * gap;
+    let n_bars = base_heights.len() as u32;
+    let total_w = n_bars * bar_w + (n_bars - 1) * gap;
     let start_x = (size - total_w) / 2;
-    let max_h = 14u32;
-    let min_h = 3u32;
-    let base_y = size - 4;
-    let phases = [0.0f32, 0.8, 1.6, 2.4, 3.2];
-    let speeds = [7.0f32, 5.5, 8.5, 6.0, 9.0];
+    let base_y = size - 3;
 
-    for i in 0..n_bars {
-        let raw = ((t * speeds[i] + phases[i]).sin() + 1.0) / 2.0;
-        let h = (min_h as f32 + raw * (max_h - min_h) as f32).round() as u32;
+    for (i, &base_h) in base_heights.iter().enumerate() {
+        let osc = (t * speeds[i] + phases[i]).sin();
+        let h = (base_h + osc * amplitude).round().max(2.0) as u32;
         let bx = start_x + i as u32 * (bar_w + gap);
         for px in bx..(bx + bar_w) {
             for py in (base_y - h)..base_y {
                 if px < size && py < size {
                     let idx = ((py * size + px) * 4) as usize;
-                    let fade = 1.0 - (base_y - py) as f32 / h as f32 * 0.25;
                     pixels[idx] = r;
                     pixels[idx + 1] = g;
                     pixels[idx + 2] = b;
-                    pixels[idx + 3] = (220.0 * fade) as u8;
+                    pixels[idx + 3] = 220;
                 }
             }
         }
