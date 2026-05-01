@@ -251,76 +251,63 @@ fn render_waveform_idle(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
     pixels
 }
 
-fn render_mic_icon(size: u32, r: u8, g: u8, b: u8, alpha: u8) -> Vec<u8> {
-    let mut pixels = vec![0u8; (size * size * 4) as usize];
-    let cx = size as f32 / 2.0;
-    let cap_w = 6.0f32;
-    let cap_h = 9.0f32;
-    let cap_top = cx - cap_h / 2.0 - 1.0;
-    let cap_bot = cap_top + cap_h;
-    let cap_l = cx - cap_w / 2.0;
-    let cap_r = cx + cap_w / 2.0;
-    let corner = cap_w / 2.0;
+/// True if (fx, fy) falls inside the rounded-rect defined by the given bounds and corner radius.
+fn in_rounded_rect(fx: f32, fy: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> bool {
+    if fx < x0 || fx > x1 || fy < y0 || fy > y1 { return false; }
+    let cx = fx.max(x0 + r).min(x1 - r);
+    let cy = fy.max(y0 + r).min(y1 - r);
+    let dx = fx - cx;
+    let dy = fy - cy;
+    dx * dx + dy * dy <= r * r
+}
 
+/// Draws a colored pill background into `pixels` (22×22 canvas, full-width capsule).
+fn draw_pill(pixels: &mut [u8], size: u32, r: u8, g: u8, b: u8) {
+    let s = size as f32;
+    // Full-width capsule: x 1..s-1, y 4..s-4, radius = half height = (s-8)/2.
+    let (x0, y0, x1, y1) = (1.0f32, 4.0, s - 1.0, s - 4.0);
+    let radius = (y1 - y0) / 2.0;
     for y in 0..size {
         for x in 0..size {
             let fx = x as f32 + 0.5;
             let fy = y as f32 + 0.5;
-            let idx = ((y * size + x) * 4) as usize;
-
-            let in_capsule = {
-                let in_rect = fx >= cap_l && fx <= cap_r && fy >= cap_top && fy <= cap_bot;
-                let top_l = ((fx - (cap_l + corner)).powi(2) + (fy - (cap_top + corner)).powi(2)).sqrt() <= corner;
-                let top_r = ((fx - (cap_r - corner)).powi(2) + (fy - (cap_top + corner)).powi(2)).sqrt() <= corner;
-                in_rect || (fy < cap_top + corner && (top_l || top_r))
-            };
-            let stand_x = (fx - cx).abs() < 0.75;
-            let stand_y = fy > cap_bot && fy < cap_bot + 4.0;
-            let base_y = (fy - (cap_bot + 4.0)).abs() < 0.75;
-            let base_x = (fx - cx).abs() < 2.5;
-            let arc_r = cap_w / 2.0 + 1.0;
-            let arc_dist = ((fx - cx).powi(2) + (fy - (cap_bot - 0.5)).powi(2)).sqrt();
-            let on_arc = (arc_dist - arc_r).abs() < 0.9 && fy >= cap_bot - 0.5;
-
-            if in_capsule || stand_x && stand_y || base_y && base_x || on_arc {
-                pixels[idx] = r;
+            if in_rounded_rect(fx, fy, x0, y0, x1, y1, radius) {
+                let idx = ((y * size + x) * 4) as usize;
+                pixels[idx]     = r;
                 pixels[idx + 1] = g;
                 pixels[idx + 2] = b;
-                pixels[idx + 3] = alpha;
+                pixels[idx + 3] = 240;
             }
         }
     }
-    pixels
 }
 
+/// Animated waveform equalizer — colored pill bg with white bars on top.
+/// `r/g/b` sets the pill color; bars are always white.
 fn render_equalizer_frame(size: u32, t: f32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
-    // Bell-curve base heights proportional to the app icon logo (short→mid→tall→mid→short).
-    // Scaled from the 18px SVG viewBox to the 22px tray icon.
-    let base_heights = [5.0f32, 10.0, 16.0, 10.0, 5.0];
-    let amplitude = 3.0f32;
+    draw_pill(&mut pixels, size, r, g, b);
+
+    // Bars scaled to fit inside the pill interior (base heights reduced ~60%).
+    let base_heights = [3.0f32, 6.0, 10.0, 6.0, 3.0];
+    let amplitude = 2.0f32;
     let phases = [0.0f32, 1.1, 2.3, 0.6, 1.8];
     let speeds = [6.5f32, 8.0, 7.0, 9.0, 5.5];
-
+    let bar_xs: [u32; 5] = [4, 7, 10, 13, 16];
     let bar_w = 2u32;
-    let gap = 1u32;
-    let n_bars = base_heights.len() as u32;
-    let total_w = n_bars * bar_w + (n_bars - 1) * gap;
-    let start_x = (size - total_w) / 2;
-    let base_y = size - 3;
+    let base_y = size - 5; // 1 px above pill bottom edge
 
-    for (i, &base_h) in base_heights.iter().enumerate() {
+    for (i, &bx) in bar_xs.iter().enumerate() {
         let osc = (t * speeds[i] + phases[i]).sin();
-        let h = (base_h + osc * amplitude).round().max(2.0) as u32;
-        let bx = start_x + i as u32 * (bar_w + gap);
+        let h = (base_heights[i] + osc * amplitude).round().max(1.0) as u32;
         for px in bx..(bx + bar_w) {
             for py in (base_y - h)..base_y {
                 if px < size && py < size {
                     let idx = ((py * size + px) * 4) as usize;
-                    pixels[idx] = r;
-                    pixels[idx + 1] = g;
-                    pixels[idx + 2] = b;
-                    pixels[idx + 3] = 220;
+                    pixels[idx]     = 255;
+                    pixels[idx + 1] = 255;
+                    pixels[idx + 2] = 255;
+                    pixels[idx + 3] = 230;
                 }
             }
         }
@@ -328,10 +315,13 @@ fn render_equalizer_frame(size: u32, t: f32, r: u8, g: u8, b: u8) -> Vec<u8> {
     pixels
 }
 
+/// Spinner arc — colored pill bg with a white partial-circle arc on top.
 fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let mut pixels = vec![0u8; (size * size * 4) as usize];
+    draw_pill(&mut pixels, size, r, g, b);
+
     let cx = size as f32 / 2.0;
-    let radius = size as f32 / 2.0 - 2.5;
+    let radius = 4.5f32; // smaller, fits inside the pill
     let thickness = 2.0f32;
     for y in 0..size {
         for x in 0..size {
@@ -343,10 +333,39 @@ fn render_spinner_icon(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
                 let skip = angle > -std::f32::consts::FRAC_PI_2 && angle < 0.3;
                 if !skip {
                     let idx = ((y * size + x) * 4) as usize;
-                    pixels[idx] = r;
-                    pixels[idx + 1] = g;
-                    pixels[idx + 2] = b;
-                    pixels[idx + 3] = 200;
+                    pixels[idx]     = 255;
+                    pixels[idx + 1] = 255;
+                    pixels[idx + 2] = 255;
+                    pixels[idx + 3] = 220;
+                }
+            }
+        }
+    }
+    pixels
+}
+
+/// Static waveform on a colored pill — used for the Error state.
+fn render_waveform_pill(size: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
+    // Reuse idle waveform (white) then overlay a pill background first.
+    let mut pixels = vec![0u8; (size * size * 4) as usize];
+    draw_pill(&mut pixels, size, r, g, b);
+
+    let bar_xs: [u32; 5] = [4, 7, 10, 13, 16];
+    let bar_heights: [u32; 5] = [3, 6, 10, 6, 3];
+    let bar_w = 2u32;
+    let base_y = size - 5;
+
+    for (i, &bx) in bar_xs.iter().enumerate() {
+        let h = bar_heights[i];
+        let top_y = base_y.saturating_sub(h);
+        for px in bx..(bx + bar_w) {
+            for py in top_y..base_y {
+                if px < size && py < size {
+                    let idx = ((py * size + px) * 4) as usize;
+                    pixels[idx]     = 255;
+                    pixels[idx + 1] = 255;
+                    pixels[idx + 2] = 255;
+                    pixels[idx + 3] = 230;
                 }
             }
         }
@@ -377,7 +396,7 @@ fn update_tray_icon(
 
     match state {
         RecordingState::Recording => {
-            // --danger: #c0392b → rgb(192, 57, 43)
+            // Red pill (#c0392b) + animated white waveform bars
             let app = app.clone();
             let handle = tokio::spawn(async move {
                 let mut t = 0.0f32;
@@ -397,12 +416,12 @@ fn update_tray_icon(
             set_tray(app, "Whisp", render_waveform_idle(22, 255, 255, 255, 200), 22);
         }
         RecordingState::Processing => {
-            // --warning-border: #e8a928 → rgb(232, 169, 40)
+            // Amber pill + white spinner arc
             set_tray(app, "Whisp — Processing", render_spinner_icon(22, 232, 169, 40), 22);
         }
         RecordingState::Error(_) => {
-            // --danger: #c0392b → rgb(192, 57, 43)
-            set_tray(app, "Whisp — Error", render_mic_icon(22, 192, 57, 43, 220), 22);
+            // Red pill + white static waveform
+            set_tray(app, "Whisp — Error", render_waveform_pill(22, 192, 57, 43), 22);
         }
     }
 }
@@ -410,18 +429,6 @@ fn update_tray_icon(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_mic_icon_buffer_size() {
-        let buf = render_mic_icon(22, 255, 0, 0, 255);
-        assert_eq!(buf.len(), 22 * 22 * 4);
-    }
-
-    #[test]
-    fn test_mic_icon_has_pixels() {
-        let buf = render_mic_icon(22, 255, 0, 0, 255);
-        assert!(buf.chunks(4).any(|p| p[3] != 0));
-    }
 
     #[test]
     fn test_equalizer_buffer_size() {
