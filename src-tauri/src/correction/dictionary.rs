@@ -24,20 +24,62 @@ pub fn save(entries: &[SubEntry]) -> Result<()> {
     Ok(())
 }
 
-/// Applies dictionary substitutions to text. Matches whole words (space-padded).
-pub fn apply(text: String) -> String {
-    let entries = match load() {
-        Ok(e) => e,
-        Err(_) => return text,
-    };
+fn apply_entries(text: &str, entries: &[SubEntry]) -> String {
     if entries.is_empty() {
-        return text;
+        return text.to_string();
     }
     let mut result = format!(" {} ", text);
-    for entry in &entries {
+    for entry in entries {
         let from = format!(" {} ", entry.from);
         let to = format!(" {} ", entry.to);
         result = result.replace(&from, &to);
     }
     result.trim().to_string()
+}
+
+pub fn apply(text: String) -> String {
+    let entries = load().unwrap_or_default();
+    apply_entries(&text, &entries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(from: &str, to: &str) -> SubEntry {
+        SubEntry {
+            from: from.to_string(),
+            to: to.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_apply_exact_match() {
+        let entries = vec![entry("ok", "okay")];
+        assert_eq!(apply_entries("ok", &entries), "okay");
+    }
+
+    #[test]
+    fn test_apply_no_match() {
+        let entries = vec![entry("ok", "okay")];
+        assert_eq!(apply_entries("not a match", &entries), "not a match");
+    }
+
+    #[test]
+    fn test_apply_word_boundary() {
+        let entries = vec![entry("its", "it's")];
+        assert_eq!(apply_entries("its itself", &entries), "it's itself");
+    }
+
+    #[test]
+    fn test_apply_multiple_substitutions() {
+        let entries = vec![entry("ok", "okay"), entry("ur", "your")];
+        assert_eq!(apply_entries("ok ur problem", &entries), "okay your problem");
+    }
+
+    #[test]
+    fn test_apply_empty_entries() {
+        let entries: Vec<SubEntry> = vec![];
+        assert_eq!(apply_entries("hello", &entries), "hello");
+    }
 }
