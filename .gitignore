@@ -3,3 +3,5 @@ src-ui/node_modules/
 src-ui/dist/
 *.DS_Store
 .env
+src-tauri/gen/apple/build/
+src-tauri/gen/apple/Externals/
