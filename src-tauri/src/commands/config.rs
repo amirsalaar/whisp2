@@ -72,3 +72,23 @@ pub fn get_platform() -> &'static str {
     #[cfg(not(any(target_os = "macos", target_os = "ios")))]
     { "other" }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_platform_returns_known_value() {
+        let p = get_platform();
+        assert!(
+            p == "macos" || p == "ios" || p == "other",
+            "unexpected platform: {p}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_get_platform_is_macos_on_macos() {
+        assert_eq!(get_platform(), "macos");
+    }
+}
