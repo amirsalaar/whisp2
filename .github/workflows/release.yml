@@ -282,9 +282,9 @@ jobs:
             | head -1 || true)
 
           if [[ -n "$PREV_TAG" ]]; then
-            CHANGES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges | head -60)
+            CHANGES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges | head -60 || true)
           else
-            CHANGES=$(git log HEAD --pretty=format:"- %s" --no-merges | head -20)
+            CHANGES=$(git log HEAD --pretty=format:"- %s" --no-merges | head -20 || true)
           fi
 
           SIGNING_NOTE=""
