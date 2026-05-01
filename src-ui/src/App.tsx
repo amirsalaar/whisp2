@@ -298,12 +298,12 @@ export default function App() {
       {/* ── Sidebar ── */}
       <nav className="sidebar">
         <div className="brand">
-          <svg className="brand-icon" width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <rect x="1"    y="7"   width="2" height="4"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
-            <rect x="4.5"  y="5"   width="2" height="8"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
-            <rect x="8"    y="2.5" width="2" height="13" rx="1" stroke="currentColor" strokeWidth="1.2"/>
-            <rect x="11.5" y="5"   width="2" height="8"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
-            <rect x="15"   y="7"   width="2" height="4"  rx="1" stroke="currentColor" strokeWidth="1.2"/>
+          <svg className="brand-icon" width="18" height="18" viewBox="0 0 18 18" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+            <rect x="1"    y="7"   width="2.2" height="4"  rx="1.1"/>
+            <rect x="4.6"  y="5"   width="2.2" height="8"  rx="1.1"/>
+            <rect x="8.1"  y="2.5" width="2.2" height="13" rx="1.1"/>
+            <rect x="11.6" y="5"   width="2.2" height="8"  rx="1.1"/>
+            <rect x="15.1" y="7"   width="2.2" height="4"  rx="1.1"/>
           </svg>
           <span className="brand-name">Whisp</span>
         </div>
