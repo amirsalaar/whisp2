@@ -1,0 +1,329 @@
+name: Release
+
+# Release model:
+#
+#   Three entry points, one job:
+#     1. Push of a vX.Y.Z tag    → build and publish that exact version
+#     2. workflow_dispatch        → pick bump (patch/minor/major) or explicit version
+#     3. Push to main whose HEAD  → opt-in via [release], [release:minor], [release:major]
+#        commit contains [release]   in the commit message
+#
+#   Version files (src-tauri/tauri.conf.json + src-tauri/Cargo.toml) are updated
+#   on the runner only — CI never pushes commits back to main.
+#
+#   Signing degrades gracefully based on which secrets are configured:
+#     notarized  — cert + all 3 notary creds  → signed + notarized DMG only
+#     signed     — cert only                  → signed, unnotarized DMG + ZIP
+#     adhoc      — no cert                    → ad-hoc signed DMG + ZIP
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump (patch/minor/major) — ignored when version is set"
+        required: false
+        default: patch
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      version:
+        description: "Explicit semver, e.g. 1.2.3 (strips leading v) — overrides bump"
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: macos-15
+    permissions:
+      contents: write
+
+    # Skip plain branch pushes without a [release] trailer.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+       contains(github.event.head_commit.message, '[release'))
+
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # ── Resolve version ────────────────────────────────────────────────────
+      # HEAD_COMMIT_MSG is loaded via env: to prevent expression injection.
+      - name: Resolve version
+        env:
+          HEAD_COMMIT_MSG: ${{ github.event.head_commit.message }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+
+          _bump_semver() {
+            local prev="$1" bump="$2"
+            local maj min pat
+            IFS='.' read -r maj min pat <<< "${prev#v}"
+            case "$bump" in
+              major) maj=$((maj+1)); min=0; pat=0 ;;
+              minor) min=$((min+1)); pat=0 ;;
+              *)     pat=$((pat+1)) ;;
+            esac
+            echo "${maj}.${min}.${pat}"
+          }
+
+          _latest_tag() {
+            git tag --sort=-version:refname \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+              | head -1 \
+              || echo "v0.0.0"
+          }
+
+          EVENT="${{ github.event_name }}"
+          REF_TYPE="${{ github.ref_type }}"
+
+          if [[ "$EVENT" == "push" && "$REF_TYPE" == "tag" ]]; then
+            RAW="${{ github.ref_name }}"
+            VERSION="${RAW#v}"
+
+          elif [[ "$EVENT" == "workflow_dispatch" ]]; then
+            EXPLICIT="${INPUT_VERSION#v}"
+            BUMP="${INPUT_BUMP:-patch}"
+            if [[ -n "$EXPLICIT" ]]; then
+              VERSION="$EXPLICIT"
+            else
+              PREV=$(_latest_tag)
+              VERSION=$(_bump_semver "$PREV" "$BUMP")
+            fi
+
+          else
+            # Branch push — parse bump kind from [release:*] trailer in HEAD commit message.
+            if echo "$HEAD_COMMIT_MSG" | grep -qE '\[release:major\]'; then BUMP="major"
+            elif echo "$HEAD_COMMIT_MSG" | grep -qE '\[release:minor\]'; then BUMP="minor"
+            else BUMP="patch"
+            fi
+            PREV=$(_latest_tag)
+            VERSION=$(_bump_semver "$PREV" "$BUMP")
+          fi
+
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version '$VERSION'. Expected x.y.z"
+            exit 1
+          fi
+
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=v${VERSION}"  >> "$GITHUB_ENV"
+          echo "Resolved: version=${VERSION}  tag=v${VERSION}"
+
+      # ── Signing mode ───────────────────────────────────────────────────────
+      - name: Detect signing mode
+        env:
+          CERT: ${{ secrets.DEVELOPER_ID_CERT_BASE64 }}
+          AID: ${{ secrets.APPLE_ID }}
+          APW: ${{ secrets.APPLE_ID_PASSWORD }}
+          TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$CERT" && -n "$AID" && -n "$APW" && -n "$TEAM" ]]; then
+            echo "SIGNING_MODE=notarized" >> "$GITHUB_ENV"
+            echo "Mode: notarized"
+          elif [[ -n "$CERT" ]]; then
+            echo "SIGNING_MODE=signed" >> "$GITHUB_ENV"
+            echo "::warning::No notarization credentials — publishing signed but unnotarized."
+          else
+            echo "SIGNING_MODE=adhoc" >> "$GITHUB_ENV"
+            echo "::warning::No Developer ID certificate — publishing ad-hoc signed."
+          fi
+
+      # ── Certificate import ─────────────────────────────────────────────────
+      - name: Import Developer ID certificate
+        if: env.SIGNING_MODE != 'adhoc'
+        env:
+          CERT_BASE64: ${{ secrets.DEVELOPER_ID_CERT_BASE64 }}
+          CERT_PASSWORD: ${{ secrets.DEVELOPER_ID_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          echo "$CERT_BASE64" | base64 -D > "$RUNNER_TEMP/cert.p12"
+          KEYCHAIN_PASS="$(uuidgen)"
+          security create-keychain -p "$KEYCHAIN_PASS" "$RUNNER_TEMP/build.keychain-db"
+          security set-keychain-settings -lut 21600 "$RUNNER_TEMP/build.keychain-db"
+          security unlock-keychain -p "$KEYCHAIN_PASS" "$RUNNER_TEMP/build.keychain-db"
+          security import "$RUNNER_TEMP/cert.p12" \
+            -P "$CERT_PASSWORD" \
+            -A -t cert -f pkcs12 \
+            -k "$RUNNER_TEMP/build.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASS" "$RUNNER_TEMP/build.keychain-db"
+          security list-keychains -d user -s "$RUNNER_TEMP/build.keychain-db" \
+            $(security list-keychains -d user | tr -d '"')
+          IDENTITY=$(security find-identity -v -p codesigning \
+            "$RUNNER_TEMP/build.keychain-db" \
+            | grep "Developer ID Application" \
+            | head -1 \
+            | sed -n 's/.*"\([^"]*\)".*/\1/p')
+          if [[ -z "$IDENTITY" ]]; then
+            echo "::error::Developer ID Application certificate not found"
+            exit 1
+          fi
+          echo "APPLE_SIGNING_IDENTITY=$IDENTITY" >> "$GITHUB_ENV"
+          echo "Certificate imported: $IDENTITY"
+
+      # ── Toolchain setup ────────────────────────────────────────────────────
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: src-ui/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: Install tauri-cli
+        run: cargo install tauri-cli --version "^2" --locked
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix src-ui
+
+      # ── Version bump (runner-only, never committed back) ───────────────────
+      - name: Bump version in tauri.conf.json + Cargo.toml
+        run: |
+          set -euo pipefail
+          jq ".version = \"$VERSION\"" src-tauri/tauri.conf.json \
+            > /tmp/tauri_conf_bumped.json
+          mv /tmp/tauri_conf_bumped.json src-tauri/tauri.conf.json
+
+          # BSD sed: "1,/pattern/" stops after first match — targets [package] only,
+          # not dependency version lines.
+          sed -i '' "1,/^version/ s/^version = \"[^\"]*\"/version = \"$VERSION\"/" \
+            src-tauri/Cargo.toml
+
+          echo "tauri.conf.json: $(jq -r .version src-tauri/tauri.conf.json)"
+          echo "Cargo.toml:      $(grep '^version' src-tauri/Cargo.toml | head -1)"
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      # cargo tauri build automatically runs beforeBuildCommand (npm run build) first.
+      # APPLE_SIGNING_IDENTITY is injected via $GITHUB_ENV from the cert import step.
+      - name: Build (cargo tauri build)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          if [[ "$SIGNING_MODE" == "notarized" ]]; then
+            cargo tauri build
+          elif [[ "$SIGNING_MODE" == "signed" ]]; then
+            # Unset notarization vars so Tauri only signs, doesn't attempt notarization.
+            unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            cargo tauri build
+          else
+            unset APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+            APPLE_SIGNING_IDENTITY="-" cargo tauri build
+          fi
+
+      # ── Artifacts ─────────────────────────────────────────────────────────
+      - name: Collect and rename artifacts
+        run: |
+          set -euo pipefail
+          DMG_SRC="target/release/bundle/dmg/Whisp2_${VERSION}_aarch64.dmg"
+          DMG_DEST="Whisp2-${VERSION}-aarch64.dmg"
+          cp "$DMG_SRC" "$DMG_DEST"
+          echo "DMG_PATH=$DMG_DEST" >> "$GITHUB_ENV"
+
+          if [[ "$SIGNING_MODE" != "notarized" ]]; then
+            ZIP_DEST="Whisp2-${VERSION}-aarch64.zip"
+            # ditto preserves symlinks and extended attributes within .app bundles
+            ditto -c -k --keepParent \
+              "target/release/bundle/macos/Whisp2.app" \
+              "$ZIP_DEST"
+            echo "ZIP_PATH=$ZIP_DEST" >> "$GITHUB_ENV"
+          else
+            echo "ZIP_PATH=" >> "$GITHUB_ENV"
+          fi
+
+      - name: SHA-256 checksums
+        run: |
+          set -euo pipefail
+          shasum -a 256 "$DMG_PATH" > "${DMG_PATH}.sha256"
+          cat "${DMG_PATH}.sha256"
+          if [[ -n "$ZIP_PATH" ]]; then
+            shasum -a 256 "$ZIP_PATH" > "${ZIP_PATH}.sha256"
+            cat "${ZIP_PATH}.sha256"
+          fi
+
+      # ── Release notes ──────────────────────────────────────────────────────
+      - name: Generate release notes
+        run: |
+          set -euo pipefail
+          PREV_TAG=$(git tag --sort=-version:refname \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+            | grep -v "^${TAG}$" \
+            | head -1 || true)
+
+          if [[ -n "$PREV_TAG" ]]; then
+            CHANGES=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s" --no-merges | head -60)
+          else
+            CHANGES=$(git log HEAD --pretty=format:"- %s" --no-merges | head -20)
+          fi
+
+          SIGNING_NOTE=""
+          if [[ "$SIGNING_MODE" == "signed" ]]; then
+            SIGNING_NOTE='
+> **Note:** This build is Developer ID–signed but not notarized. If macOS blocks the app on first launch, right-click → **Open**.'
+          elif [[ "$SIGNING_MODE" == "adhoc" ]]; then
+            SIGNING_NOTE='
+> **Note:** This build is ad-hoc signed and not notarized. To bypass Gatekeeper after mounting the DMG:
+> ```
+> xattr -dr com.apple.quarantine /Applications/Whisp2.app
+> ```'
+          fi
+
+          {
+            echo 'RELEASE_NOTES<<RELEASE_NOTES_EOF'
+            printf "## Installation\n\nMount the DMG and drag **Whisp2.app** to /Applications.\n"
+            printf "\n## What's Changed\n\n"
+            echo "$CHANGES"
+            [[ -n "$SIGNING_NOTE" ]] && printf "\n%s\n" "$SIGNING_NOTE"
+            echo 'RELEASE_NOTES_EOF'
+          } >> "$GITHUB_ENV"
+
+      - name: Clean up keychain
+        if: always() && env.SIGNING_MODE != 'adhoc'
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+
+      # ── Publish ────────────────────────────────────────────────────────────
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG }}
+          name: Whisp2 ${{ env.VERSION }}
+          body: ${{ env.RELEASE_NOTES }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          files: |
+            ${{ env.DMG_PATH }}
+            ${{ env.DMG_PATH }}.sha256
+            ${{ env.ZIP_PATH }}
+            ${{ env.ZIP_PATH }}.sha256
