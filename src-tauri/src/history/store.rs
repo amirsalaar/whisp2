@@ -129,3 +129,67 @@ pub async fn prune(pool: &SqlitePool, max: usize) -> Result<()> {
     .await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    async fn test_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        create_schema(&pool).await.unwrap();
+        pool
+    }
+
+    #[tokio::test]
+    async fn test_insert_and_list() {
+        let pool = test_pool().await;
+        insert(&pool, "hello world", None, "whisper").await.unwrap();
+        let entries = list(&pool, 10).await.unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].text, "hello world");
+    }
+
+    #[tokio::test]
+    async fn test_delete_entry() {
+        let pool = test_pool().await;
+        let entry = insert(&pool, "to delete", None, "whisper").await.unwrap();
+        delete(&pool, &entry.id).await.unwrap();
+        let entries = list(&pool, 10).await.unwrap();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_delete_all() {
+        let pool = test_pool().await;
+        insert(&pool, "one", None, "whisper").await.unwrap();
+        insert(&pool, "two", None, "whisper").await.unwrap();
+        insert(&pool, "three", None, "whisper").await.unwrap();
+        delete_all(&pool).await.unwrap();
+        let entries = list(&pool, 10).await.unwrap();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_prune_keeps_newest() {
+        let pool = test_pool().await;
+        for i in 0..5 {
+            insert(&pool, &format!("entry {i}"), None, "whisper").await.unwrap();
+        }
+        prune(&pool, 3).await.unwrap();
+        let entries = list(&pool, 10).await.unwrap();
+        assert_eq!(entries.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_insert_returns_entry() {
+        let pool = test_pool().await;
+        let entry = insert(&pool, "check me", Some("Safari"), "whisper").await.unwrap();
+        assert_eq!(entry.text, "check me");
+        assert!(!entry.id.is_empty());
+        assert_eq!(entry.source_app.as_deref(), Some("Safari"));
+    }
+}
