@@ -1,6 +1,7 @@
 use tauri::State;
 
 use crate::audio::capture;
+#[cfg(not(target_os = "macos"))]
 use crate::hotkey::mode::RecordingCommand;
 use crate::AppState;
 
@@ -10,7 +11,10 @@ pub fn list_audio_input_devices() -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn start_recording_mobile(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn start_recording_mobile(#[cfg_attr(target_os = "macos", allow(unused_variables))] state: State<'_, AppState>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return Err("mobile recording commands are not available on macOS".into());
+    #[cfg(not(target_os = "macos"))]
     state
         .recording_cmd_tx
         .send(RecordingCommand::Start(None))
@@ -19,7 +23,10 @@ pub async fn start_recording_mobile(state: State<'_, AppState>) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn stop_recording_mobile(state: State<'_, AppState>) -> Result<(), String> {
+pub async fn stop_recording_mobile(#[cfg_attr(target_os = "macos", allow(unused_variables))] state: State<'_, AppState>) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return Err("mobile recording commands are not available on macOS".into());
+    #[cfg(not(target_os = "macos"))]
     state
         .recording_cmd_tx
         .send(RecordingCommand::Stop)

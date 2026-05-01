@@ -231,6 +231,23 @@ export default function App() {
   useEffect(() => {
     invoke<string>("get_platform").then((p) => {
       setPlatform(p);
+      // Trigger initial permission check once platform is known.
+      // The focus listener alone misses the case where the window already has focus on open.
+      invoke<boolean>("check_microphone").then((m) => {
+        setMicrophone(m);
+        if (p !== "ios") {
+          Promise.all([
+            invoke<boolean>("check_accessibility"),
+            invoke<boolean>("check_input_monitoring"),
+          ]).then(([a, im]) => {
+            setAccessibility(a);
+            setInputMonitoring(im);
+          });
+        } else {
+          setAccessibility(null);
+          setInputMonitoring(null);
+        }
+      });
     });
     invoke<AppConfig>("get_config").then(setConfig);
     invoke<string | null>("get_api_key", { keyName: "openai_api_key" }).then(
