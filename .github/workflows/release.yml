@@ -52,9 +52,9 @@ jobs:
 
     # Skip plain branch pushes without a [release] trailer.
     if: >
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' || (github.event_name == 'push'
+      && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'push'
+      && github.ref == 'refs/heads/main' &&
        contains(github.event.head_commit.message, '[release'))
 
     steps:
@@ -185,7 +185,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
           cache: npm
           cache-dependency-path: src-ui/package-lock.json
 
@@ -305,7 +305,8 @@ jobs:
 
       - name: Clean up keychain
         if: always() && env.SIGNING_MODE != 'adhoc'
-        run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null || true
+        run: security delete-keychain "$RUNNER_TEMP/build.keychain-db" 2>/dev/null ||
+          true
 
       # ── Publish ────────────────────────────────────────────────────────────
       - name: Publish GitHub Release
