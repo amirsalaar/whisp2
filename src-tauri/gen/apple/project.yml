@@ -2,7 +2,7 @@ name: whisp-rs
 options:
   bundleIdPrefix: com.whisp2.app
   deploymentTarget:
-    iOS: 14.0
+    iOS: 17.0
 fileGroups: [../../src]
 configs:
   debug: debug
@@ -29,6 +29,7 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+      - path: Shared
       - path: Assets.xcassets
       - path: Externals
       - path: whisp-rs_iOS
@@ -54,8 +55,14 @@ targets:
         CFBundleShortVersionString: 0.1.0
         CFBundleVersion: "0.1.0"
         NSMicrophoneUsageDescription: "Whisp needs microphone access to transcribe your speech."
+        NSSupportsLiveActivities: true
     entitlements:
       path: whisp-rs_iOS/whisp-rs_iOS.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.whisp2.app
+        keychain-access-groups:
+          - $(AppIdentifierPrefix)com.whisp2.app
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full
@@ -87,6 +94,10 @@ targets:
       - sdk: UIKit.framework
       - sdk: WebKit.framework
       - sdk: AppIntents.framework
+      - sdk: ActivityKit.framework
+      - target: WhispLiveActivity
+        embed: true
+        codeSign: true
     preBuildScripts:
       - script: cargo tauri ios xcode-script -v --platform ${PLATFORM_DISPLAY_NAME:?} --sdk-root ${SDKROOT:?} --framework-search-paths "${FRAMEWORK_SEARCH_PATHS:?}" --header-search-paths "${HEADER_SEARCH_PATHS:?}" --gcc-preprocessor-definitions "${GCC_PREPROCESSOR_DEFINITIONS:-}" --configuration ${CONFIGURATION:?} ${FORCE_COLOR} ${ARCHS:?}
         name: Build Rust Code
@@ -94,3 +105,35 @@ targets:
         outputFiles:
           - $(SRCROOT)/Externals/x86_64/${CONFIGURATION}/libapp.a
           - $(SRCROOT)/Externals/arm64/${CONFIGURATION}/libapp.a
+  WhispLiveActivity:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: WhispLiveActivity
+      - path: Shared
+    info:
+      path: WhispLiveActivity/Info.plist
+      properties:
+        CFBundleDisplayName: Whisp Live Activity
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: WhispLiveActivity/WhispLiveActivity.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.whisp2.app
+    settings:
+      base:
+        PRODUCT_NAME: WhispLiveActivity
+        PRODUCT_BUNDLE_IDENTIFIER: com.whisp2.app.LiveActivity
+        DEVELOPMENT_TEAM: 95865DATRD
+        CODE_SIGN_STYLE: Automatic
+        SKIP_INSTALL: true
+        ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES: false
+        ARCHS: [arm64]
+        VALID_ARCHS: arm64
+        EXCLUDED_ARCHS[sdk=iphoneos*]: x86_64
+    dependencies:
+      - sdk: SwiftUI.framework
+      - sdk: WidgetKit.framework
+      - sdk: ActivityKit.framework

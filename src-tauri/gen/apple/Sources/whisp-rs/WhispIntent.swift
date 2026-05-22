@@ -1,10 +1,94 @@
 #if canImport(UIKit)
+import ActivityKit
 import AppIntents
 import AudioToolbox
 import AVFoundation
 import Foundation
 import SQLite3
 import UIKit
+
+// MARK: - Rust FFI declarations
+//
+// These symbols are statically linked into whisp_rs_lib.a, which is also
+// linked into the host app. Because WhispRecordIntent sets openAppWhenRun
+// = true, the AppIntent runs in the host-app process, so the symbols are
+// reachable here. See src-tauri/src/ffi.rs for the Rust side.
+
+@_silgen_name("whisp_transcribe_local_wav")
+private func whisp_transcribe_local_wav(
+    _ wavPath: UnsafePointer<CChar>,
+    _ modelPath: UnsafePointer<CChar>,
+    _ language: UnsafePointer<CChar>?,
+    _ errOut: UnsafeMutablePointer<UnsafeMutablePointer<CChar>?>?
+) -> UnsafeMutablePointer<CChar>?
+
+@_silgen_name("whisp_free_string")
+private func whisp_free_string(_ s: UnsafeMutablePointer<CChar>?)
+
+// MARK: - Provider config
+
+private struct ProviderConfig {
+    let apiKey: String
+    let baseURL: String
+    let model: String
+    let provider: String
+    let localModelPath: String?
+    let language: String?
+}
+
+// Parsed-but-keyless snapshot of config.json. Cached across AppIntent
+// invocations and invalidated on file mtime change. Keys live in keychain
+// and are read fresh every call so user-side key rotation isn't masked.
+private struct ConfigSnapshot {
+    let provider: String
+    let openaiURL: String
+    let openaiModel: String
+    let groqURL: String
+    let groqModel: String
+    let localModelPath: String?
+    let language: String?
+}
+
+private final class ConfigCache {
+    static let shared = ConfigCache()
+    private let lock = NSLock()
+    private var cached: ConfigSnapshot?
+    private var cachedMtime: Date?
+    private var cachedPath: String?
+
+    func snapshot(at url: URL?) -> ConfigSnapshot? {
+        guard let url else { return nil }
+        let mtime = (try? FileManager.default.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
+
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let cached, let cachedMtime, let cachedPath,
+           cachedPath == url.path, cachedMtime == mtime {
+            return cached
+        }
+
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            // Don't poison the cache on parse failure — let caller fall back to defaults.
+            return nil
+        }
+
+        let snap = ConfigSnapshot(
+            provider:       json["provider"] as? String ?? "open_a_i",
+            openaiURL:      json["openai_api_url"] as? String ?? "https://api.openai.com/v1/audio/transcriptions",
+            openaiModel:    json["openai_model"] as? String ?? "whisper-1",
+            groqURL:        json["groq_api_url"] as? String ?? "https://api.groq.com/openai/v1/audio/transcriptions",
+            groqModel:      json["groq_model"] as? String ?? "whisper-large-v3-turbo",
+            localModelPath: json["local_whisper_model_path"] as? String,
+            language:       json["language"] as? String
+        )
+        cached = snap
+        cachedMtime = mtime
+        cachedPath = url.path
+        return snap
+    }
+}
 
 // MARK: - Record and Transcribe Intent
 
@@ -20,6 +104,16 @@ struct WhispRecordIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         NSLog("[WhispIntent] perform() started")
+
+        // Action Button re-press while a session is live: stop the current one
+        // and exit. The previous perform()'s recorder will finish its own
+        // transcription. This prevents stacked AVAudioRecorder instances.
+        if let activeId = WhispRecorder.currentSessionId() {
+            NSLog("[WhispIntent] active session %@ — signalling stop and exiting", activeId)
+            whispPostStopNotification(sessionId: activeId)
+            return .result(value: "")
+        }
+
         let recorder = WhispRecorder()
         let (text, provider) = try await recorder.recordAndTranscribe()
         NSLog("[WhispIntent] transcription complete: %d chars", text.count)
@@ -62,20 +156,107 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
     private var recorder: AVAudioRecorder?
     private let lock = NSLock()
     private var continuation: CheckedContinuation<URL, Error>?
+
+    // Tracks the in-flight recording session so a second Action Button press
+    // can stop the first instead of starting a parallel AVAudioRecorder.
+    // Also read by Darwin-notification observers to know which key to flip.
+    private static let sessionLock = NSLock()
+    private static var activeSessionId: String?
+
+    static func currentSessionId() -> String? {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        return activeSessionId
+    }
+
+    static func setActiveSession(_ id: String?) {
+        sessionLock.lock(); defer { sessionLock.unlock() }
+        activeSessionId = id
+    }
+    // 16 kHz mono 16-bit PCM WAV — what the local whisper.cpp path expects,
+    // and what the cloud endpoints (OpenAI/Groq) also accept.
     private let fileURL: URL = FileManager.default.temporaryDirectory
         .appendingPathComponent(UUID().uuidString)
-        .appendingPathExtension("m4a")
+        .appendingPathExtension("wav")
+
+    // In-memory stop flag flipped by the Darwin-notification observer or the
+    // foreground re-entry observer. Polled by meterAndWaitForStop. Local to
+    // this recorder instance so the value is always immediate (UserDefaults
+    // synchronization across processes is too slow).
+    private let stopRequested = AtomicFlag()
 
     func recordAndTranscribe() async throws -> (text: String, provider: String) {
-        let audioURL = try await record()
+        let activity: Any?
+        let sessionId: String
+        if #available(iOS 17.0, *) {
+            let started = (try? Self.startActivity()) ?? nil
+            activity = started?.activity
+            sessionId = started?.sessionId ?? UUID().uuidString
+        } else {
+            activity = nil
+            sessionId = UUID().uuidString
+        }
+
+        Self.setActiveSession(sessionId)
+        // Reset the stop flag for this session before recording starts.
+        Self.appGroupDefaults?.set(false, forKey: Self.stopKey(sessionId))
+
+        // Cross-process stop signal from WhispStopIntent (Live Activity button
+        // running in the extension process). Darwin notifications cross
+        // process boundaries immediately, unlike UserDefaults reads.
+        let darwinObserver = installDarwinStopObserver(sessionId: sessionId)
+
+        // Foreground re-entry stops the recorder. Debounce 1.5s to ignore the
+        // initial activation that the AppIntent itself triggers.
+        let foregroundObserver = await Self.installForegroundStopObserver { [weak self] in
+            self?.stopRequested.set()
+        }
+        defer {
+            removeDarwinStopObserver(darwinObserver)
+            if let foregroundObserver {
+                NotificationCenter.default.removeObserver(foregroundObserver)
+            }
+            Self.appGroupDefaults?.removeObject(forKey: Self.stopKey(sessionId))
+            Self.setActiveSession(nil)
+        }
+
+        let audioURL: URL
+        do {
+            audioURL = try await record(activity: activity, sessionId: sessionId)
+        } catch {
+            if #available(iOS 17.0, *) {
+                await Self.endActivity(activity, phase: .error,
+                                       preview: "",
+                                       errorMessage: error.localizedDescription)
+            }
+            throw error
+        }
         defer {
             try? FileManager.default.removeItem(at: audioURL)
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
-        return try await transcribe(audioURL: audioURL)
+
+        if #available(iOS 17.0, *) {
+            await Self.updateActivity(activity, phase: .processing, level: 0)
+        }
+
+        do {
+            let result = try await transcribe(audioURL: audioURL)
+            if #available(iOS 17.0, *) {
+                await Self.endActivity(activity, phase: .done,
+                                       preview: result.text, errorMessage: "")
+            }
+            return result
+        } catch {
+            if #available(iOS 17.0, *) {
+                await Self.endActivity(activity, phase: .error,
+                                       preview: "",
+                                       errorMessage: error.localizedDescription)
+            }
+            throw error
+        }
     }
 
-    private func record() async throws -> URL {
+    private func record(activity: Any? = nil, sessionId: String) async throws -> URL {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.record, mode: .default, options: .allowBluetooth)
@@ -86,10 +267,12 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
         }
 
         let settings: [String: Any] = [
-            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVFormatIDKey: Int(kAudioFormatLinearPCM),
             AVSampleRateKey: 16000,
             AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
         ]
 
         recorder = try AVAudioRecorder(url: fileURL, settings: settings)
@@ -101,34 +284,50 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
                 lock.lock()
                 self.continuation = continuation
                 lock.unlock()
-                // Hard cap; silence detection will stop it sooner.
-                recorder?.record(forDuration: 8)
-                // Poll for silence: stop ~1.5s after speech ends.
-                Task { await self.stopOnSilence() }
+                // Unbounded recording — only explicit stop signals end this.
+                recorder?.record()
+                Task { [activity] in
+                    await self.meterAndWaitForStop(activity: activity, sessionId: sessionId)
+                }
             }
         } onCancel: {
             self.recorder?.stop()
         }
     }
 
-    // -40 dBFS threshold paired with averagePower (RMS). Peak power was too noisy
-    // — instantaneous spikes from background noise kept resetting the trail timer.
+    // -40 dBFS averagePower threshold; 1.5s trailing silence after speech is
+    // detected ends the recording naturally. Long enough to ride out
+    // mid-sentence breaths and thinking pauses but short enough that users
+    // don't have to reach for the Stop button on every utterance.
     private let speechThreshold: Float = -40
-    // Stop 1.0s after last speech detected (gives time for natural pause between words).
-    private let silenceTrailSeconds: TimeInterval = 1.0
+    private let silenceTrailSeconds: TimeInterval = 1.5
 
-    private func stopOnSilence() async {
+    // Poll loop: pushes audio level to the Live Activity at ~5 Hz, watches
+    // the cross-process stop signal (WhispStopIntent / foreground re-entry),
+    // and runs silence detection. Stops on whichever fires first.
+    private func meterAndWaitForStop(activity: Any? = nil, sessionId: String) async {
+        let pollInterval: TimeInterval = 0.1
+        var pollCount = 0
         var speechDetected = false
         var lastSpeechTime = Date()
-        let pollInterval: TimeInterval = 0.1
 
         while recorder?.isRecording == true {
             try? await Task.sleep(nanoseconds: UInt64(pollInterval * 1_000_000_000))
             guard recorder?.isRecording == true else { break }
 
+            if stopRequested.isSet {
+                NSLog("[WhispIntent] stop requested — stopping recorder")
+                recorder?.stop()
+                break
+            }
+
             recorder?.updateMeters()
             let power = recorder?.averagePower(forChannel: 0) ?? -160
-            NSLog("[WhispIntent] dBFS=%.1f speechDetected=%@", power, speechDetected ? "true" : "false")
+
+            pollCount += 1
+            if #available(iOS 17.0, *), pollCount % 2 == 0 {
+                await WhispRecorder.updateActivity(activity, phase: .recording, level: power)
+            }
 
             if power > speechThreshold {
                 speechDetected = true
@@ -155,11 +354,16 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
     }
 
     private func transcribe(audioURL: URL) async throws -> (text: String, provider: String) {
-        let (apiKey, baseURL, model, provider) = try readProviderConfig()
-        NSLog("[WhispIntent] transcribe: provider=%@ baseURL=%@ model=%@", provider, baseURL, model)
+        let cfg = try readProviderConfig()
+        NSLog("[WhispIntent] transcribe: provider=%@ baseURL=%@ model=%@",
+              cfg.provider, cfg.baseURL, cfg.model)
 
-        guard let endpointURL = URL(string: baseURL) else {
-            throw WhispError.apiFailed("Invalid API URL: \(baseURL)")
+        if cfg.provider == "local_whisper", let modelPath = cfg.localModelPath {
+            return try runLocalWhisper(wavURL: audioURL, modelPath: modelPath, language: cfg.language)
+        }
+
+        guard let endpointURL = URL(string: cfg.baseURL) else {
+            throw WhispError.apiFailed("Invalid API URL: \(cfg.baseURL)")
         }
 
         let audioData = try Data(contentsOf: audioURL)
@@ -170,16 +374,16 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
         request.timeoutInterval = 60
 
         let boundary = UUID().uuidString
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("Bearer \(cfg.apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
 
         var body = Data()
-        body.appendField("model", value: model, boundary: boundary)
-        body.appendFile("file", filename: "audio.m4a", mimeType: "audio/m4a", data: audioData, boundary: boundary)
+        body.appendField("model", value: cfg.model, boundary: boundary)
+        body.appendFile("file", filename: "audio.wav", mimeType: "audio/wav", data: audioData, boundary: boundary)
         body.appendFinalBoundary(boundary: boundary)
         request.httpBody = body
 
-        NSLog("[WhispIntent] sending request to %@", baseURL)
+        NSLog("[WhispIntent] sending request to %@", cfg.baseURL)
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await URLSession.shared.data(for: request)
@@ -197,63 +401,112 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
 
         let decoded = try JSONDecoder().decode(TranscriptionResponse.self, from: data)
         NSLog("[WhispIntent] decoded text: %d chars", decoded.text.count)
-        return (text: decoded.text, provider: provider)
+        return (text: decoded.text, provider: cfg.provider)
     }
 
-    // Read provider, URL, model, and key from config.json + keychain.
-    // Mirrors what Rust does in transcription/manager.rs.
-    private func readProviderConfig() throws -> (apiKey: String, baseURL: String, model: String, provider: String) {
-        let defaultOpenAI = ("https://api.openai.com/v1/audio/transcriptions", "whisper-1")
-        let defaultGroq   = ("https://api.groq.com/openai/v1/audio/transcriptions", "whisper-large-v3-turbo")
+    // Run on-device Whisper via the Rust FFI. Synchronous from Swift's POV
+    // (the Rust side spins a current-thread tokio runtime) but the AppIntent
+    // is already on a background async context so this doesn't block the
+    // main thread.
+    private func runLocalWhisper(wavURL: URL, modelPath: String, language: String?)
+        throws -> (text: String, provider: String) {
+        NSLog("[WhispIntent] local_whisper: wav=%@ model=%@", wavURL.path, modelPath)
+        var errPtr: UnsafeMutablePointer<CChar>? = nil
+        let resultPtr: UnsafeMutablePointer<CChar>? = wavURL.path.withCString { wav in
+            modelPath.withCString { model in
+                if let lang = language, !lang.isEmpty {
+                    return lang.withCString { langPtr in
+                        whisp_transcribe_local_wav(wav, model, langPtr, &errPtr)
+                    }
+                } else {
+                    return whisp_transcribe_local_wav(wav, model, nil, &errPtr)
+                }
+            }
+        }
 
-        let provider: String
-        let openaiURL: String
-        let openaiModel: String
-        let groqURL: String
-        let groqModel: String
+        if let resultPtr {
+            let text = String(cString: resultPtr)
+            whisp_free_string(resultPtr)
+            NSLog("[WhispIntent] local_whisper success: %d chars", text.count)
+            return (text: text, provider: "local_whisper")
+        }
 
+        let msg: String
+        if let errPtr {
+            msg = String(cString: errPtr)
+            whisp_free_string(errPtr)
+        } else {
+            msg = "unknown local Whisper error"
+        }
+        NSLog("[WhispIntent] local_whisper failed: %@", msg)
+        throw WhispError.apiFailed("Local Whisper: \(msg)")
+    }
+
+    // Read provider, URL, model, key, and (for local_whisper) model path from
+    // config.json + keychain. Mirrors what Rust does in transcription/manager.rs.
+    // The parsed config is cached across AppIntent invocations and invalidated
+    // by config.json mtime; keychain is read fresh so key rotation takes effect
+    // immediately.
+    private func readProviderConfig() throws -> ProviderConfig {
         let configURL = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)
             .first?
             .appendingPathComponent("config.json")
 
-        NSLog("[WhispIntent] config path: %@", configURL?.path ?? "nil")
+        let snap = ConfigCache.shared.snapshot(at: configURL) ?? ConfigSnapshot(
+            provider:       "open_a_i",
+            openaiURL:      "https://api.openai.com/v1/audio/transcriptions",
+            openaiModel:    "whisper-1",
+            groqURL:        "https://api.groq.com/openai/v1/audio/transcriptions",
+            groqModel:      "whisper-large-v3-turbo",
+            localModelPath: nil,
+            language:       nil
+        )
+        NSLog("[WhispIntent] using provider=%@", snap.provider)
 
-        if let configURL,
-           let data = try? Data(contentsOf: configURL),
-           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            NSLog("[WhispIntent] config loaded, provider=%@", json["provider"] as? String ?? "nil")
-            provider    = json["provider"] as? String ?? "open_a_i"
-            openaiURL   = json["openai_api_url"] as? String ?? defaultOpenAI.0
-            openaiModel = json["openai_model"] as? String ?? defaultOpenAI.1
-            groqURL     = json["groq_api_url"] as? String ?? defaultGroq.0
-            groqModel   = json["groq_model"] as? String ?? defaultGroq.1
-        } else {
-            NSLog("[WhispIntent] config not found or parse failed — using OpenAI defaults")
-            provider    = "open_a_i"
-            openaiURL   = defaultOpenAI.0
-            openaiModel = defaultOpenAI.1
-            groqURL     = defaultGroq.0
-            groqModel   = defaultGroq.1
-        }
-
-        NSLog("[WhispIntent] using provider=%@", provider)
-
-        switch provider {
+        switch snap.provider {
         case "groq":
             guard let key = readKeychainKey("groq_api_key") else { throw WhispError.noApiKey }
-            return (key, groqURL, groqModel, "groq")
+            return ProviderConfig(apiKey: key, baseURL: snap.groqURL, model: snap.groqModel,
+                                  provider: "groq", localModelPath: nil, language: snap.language)
         case "gemini":
             guard let key = readKeychainKey("gemini_api_key") else { throw WhispError.noApiKey }
-            return (key, openaiURL, openaiModel, "gemini")
+            return ProviderConfig(apiKey: key, baseURL: snap.openaiURL, model: snap.openaiModel,
+                                  provider: "gemini", localModelPath: nil, language: snap.language)
         case "local_whisper":
-            // Local Whisper can't run from the Action Button — fall back to OpenAI if available.
-            guard let key = readKeychainKey("openai_api_key") else { throw WhispError.localWhisperUnsupported }
-            return (key, openaiURL, openaiModel, "open_a_i")
+            guard let stored = snap.localModelPath, !stored.isEmpty else {
+                throw WhispError.localWhisperModelMissing
+            }
+            // Config stores a filename ("ggml-tiny.bin") to survive iOS data
+            // container UUID rotation across Xcode reinstalls. Resolve to an
+            // absolute path under Documents/models for the existence check
+            // and so Rust's mmap call gets a usable path. Legacy absolute
+            // paths from older builds pass through unchanged.
+            let resolved = Self.resolveModelPath(stored)
+            guard FileManager.default.fileExists(atPath: resolved) else {
+                NSLog("[WhispIntent] local model not found at resolved path: %@ (stored=%@)", resolved, stored)
+                throw WhispError.localWhisperModelMissing
+            }
+            return ProviderConfig(apiKey: "", baseURL: "", model: "",
+                                  provider: "local_whisper", localModelPath: resolved,
+                                  language: snap.language)
         default: // "open_a_i"
             guard let key = readKeychainKey("openai_api_key") else { throw WhispError.noApiKey }
-            return (key, openaiURL, openaiModel, "open_a_i")
+            return ProviderConfig(apiKey: key, baseURL: snap.openaiURL, model: snap.openaiModel,
+                                  provider: "open_a_i", localModelPath: nil, language: snap.language)
         }
+    }
+
+    // Mirror of Rust's commands::model_download::resolve_model_path.
+    // Absolute path → return as-is. Relative (filename) → resolve under
+    // Documents/models which is where the Rust download path writes.
+    static func resolveModelPath(_ stored: String) -> String {
+        if stored.hasPrefix("/") { return stored }
+        let docs = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first
+        guard let docs else { return stored }
+        return docs.appendingPathComponent("models").appendingPathComponent(stored).path
     }
 
     private func readKeychainKey(_ account: String) -> String? {
@@ -271,6 +524,148 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
         NSLog("[WhispIntent] keychain '%@': status=%d", account, status)
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+}
+
+// MARK: - Live Activity helpers
+
+@available(iOS 17.0, *)
+extension WhispRecorder {
+    struct StartedActivity {
+        let activity: Activity<WhispActivityAttributes>
+        let sessionId: String
+    }
+
+    static func startActivity() throws -> StartedActivity? {
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else {
+            NSLog("[WhispIntent] Live Activities disabled by user — skipping")
+            return nil
+        }
+        let sessionId = UUID().uuidString
+        let attrs = WhispActivityAttributes(
+            sessionId: sessionId,
+            startedAt: Date()
+        )
+        let initial = WhispActivityAttributes.ContentState(
+            phase: .recording,
+            levelDbfs: -160,
+            transcriptPreview: "",
+            errorMessage: ""
+        )
+        let a = try Activity.request(
+            attributes: attrs,
+            content: .init(state: initial, staleDate: Date().addingTimeInterval(60)),
+            pushType: nil
+        )
+        return StartedActivity(activity: a, sessionId: sessionId)
+    }
+
+    static func updateActivity(
+        _ erased: Any?,
+        phase: WhispActivityAttributes.ContentState.Phase,
+        level: Float,
+        errorMessage: String = ""
+    ) async {
+        guard let a = erased as? Activity<WhispActivityAttributes> else { return }
+        let s = WhispActivityAttributes.ContentState(
+            phase: phase,
+            levelDbfs: level,
+            transcriptPreview: "",
+            errorMessage: errorMessage
+        )
+        await a.update(.init(state: s, staleDate: Date().addingTimeInterval(60)))
+    }
+
+    static func endActivity(
+        _ erased: Any?,
+        phase: WhispActivityAttributes.ContentState.Phase,
+        preview: String,
+        errorMessage: String = ""
+    ) async {
+        guard let a = erased as? Activity<WhispActivityAttributes> else { return }
+        let s = WhispActivityAttributes.ContentState(
+            phase: phase,
+            levelDbfs: 0,
+            transcriptPreview: String(preview.prefix(80)),
+            errorMessage: errorMessage
+        )
+        // Linger 4s on Lock Screen so user sees the result, then auto-dismiss.
+        await a.end(
+            .init(state: s, staleDate: nil),
+            dismissalPolicy: .after(Date().addingTimeInterval(4))
+        )
+    }
+}
+
+// MARK: - Stop signal plumbing (Darwin notification + foreground observer)
+
+// Thread-safe flag for the recorder polling loop. Set from observer callbacks
+// that may run on arbitrary threads (Darwin notification queue, main queue).
+private final class AtomicFlag {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+    func set() {
+        lock.lock(); defer { lock.unlock() }
+        value = true
+    }
+}
+
+@available(iOS 16.0, *)
+extension WhispRecorder {
+    static var appGroupDefaults: UserDefaults? {
+        UserDefaults(suiteName: whispAppGroupSuite)
+    }
+    static func stopKey(_ sessionId: String) -> String { whispStopKey(sessionId) }
+
+    @MainActor
+    static func installForegroundStopObserver(_ onStop: @escaping () -> Void) -> NSObjectProtocol? {
+        let started = Date()
+        // Ignore the activation that the AppIntent itself triggers when bringing
+        // the app forward. Anything after the debounce window is a user re-entry.
+        let debounce: TimeInterval = 1.5
+        return NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            guard Date().timeIntervalSince(started) >= debounce else {
+                NSLog("[WhispIntent] foreground activation within debounce — ignoring")
+                return
+            }
+            NSLog("[WhispIntent] foreground re-entry — stop signal")
+            onStop()
+        }
+    }
+
+    func installDarwinStopObserver(sessionId: String) -> UnsafeMutableRawPointer {
+        // We register the recorder's stopRequested flag as the observer's
+        // context. CFNotificationCenterAddObserver uses an Unmanaged opaque
+        // pointer; we keep the flag alive via the recorder's own lifetime.
+        let ctx = Unmanaged.passUnretained(stopRequested).toOpaque()
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterAddObserver(
+            center,
+            ctx,
+            { _, ctx, _, _, _ in
+                guard let ctx else { return }
+                let flag = Unmanaged<AtomicFlag>.fromOpaque(ctx).takeUnretainedValue()
+                NSLog("[WhispIntent] darwin stop notification — setting flag")
+                flag.set()
+            },
+            whispStopDarwinNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+        return ctx
+    }
+
+    func removeDarwinStopObserver(_ ctx: UnsafeMutableRawPointer) {
+        let center = CFNotificationCenterGetDarwinNotifyCenter()
+        CFNotificationCenterRemoveEveryObserver(center, ctx)
     }
 }
 
@@ -339,14 +734,14 @@ private struct TranscriptionResponse: Decodable {
 private enum WhispError: LocalizedError {
     case recordingFailed
     case noApiKey
-    case localWhisperUnsupported
+    case localWhisperModelMissing
     case apiFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .recordingFailed: return "Recording failed."
         case .noApiKey: return "No API key found. Open Whisp, add your key in Settings, then try again."
-        case .localWhisperUnsupported: return "Local Whisper can't run from the Action Button. Switch to OpenAI or Groq in Settings."
+        case .localWhisperModelMissing: return "No local Whisper model selected. Open Whisp, go to Settings → Local (on-device), and download a model."
         case .apiFailed(let msg): return "Transcription failed: \(msg)"
         }
     }
