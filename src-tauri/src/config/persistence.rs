@@ -111,3 +111,151 @@ fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::models::TranscriptionProvider;
+    use std::sync::Mutex;
+
+    // Tests in this module mutate the process-wide HOME env var. Serialize
+    // them so they don't race each other.
+    static HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    struct HomeGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+        previous: Option<String>,
+    }
+
+    impl HomeGuard {
+        fn new(new_home: &std::path::Path) -> Self {
+            let lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let previous = std::env::var("HOME").ok();
+            std::env::set_var("HOME", new_home);
+            Self { _lock: lock, previous }
+        }
+    }
+
+    impl Drop for HomeGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn app_support_dir_lives_under_com_whisp2_app() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        let dir = app_support_dir().expect("app_support_dir");
+        assert!(
+            dir.ends_with("Library/Application Support/com.whisp2.app"),
+            "unexpected dir: {dir:?}"
+        );
+        assert!(dir.exists(), "app_support_dir should create the directory");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn load_returns_default_when_no_config_or_old_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        let cfg = load().expect("load");
+        assert_eq!(cfg, AppConfig::default());
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn save_then_load_round_trips_a_modified_config() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        let mut cfg = AppConfig::default();
+        cfg.provider = TranscriptionProvider::Groq;
+        cfg.openai_model = "whisper-custom".into();
+        cfg.play_completion_sound = false;
+
+        save(&cfg).expect("save");
+        let loaded = load().expect("load");
+        assert_eq!(loaded, cfg);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn migrate_copies_config_db_and_models_from_old_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        // Seed the old com.whisp.whisp-rs directory.
+        let old_dir = tmp
+            .path()
+            .join("Library/Application Support/com.whisp.whisp-rs");
+        std::fs::create_dir_all(&old_dir).unwrap();
+
+        let mut original = AppConfig::default();
+        original.gemini_model = "migrated-marker".into();
+        std::fs::write(
+            old_dir.join("config.json"),
+            serde_json::to_vec_pretty(&original).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(old_dir.join("history.db"), b"db-bytes").unwrap();
+        let old_models = old_dir.join("models");
+        std::fs::create_dir_all(&old_models).unwrap();
+        std::fs::write(old_models.join("ggml-tiny.bin"), b"model-bytes").unwrap();
+
+        // load() should see no new config and migrate.
+        let loaded = load().expect("load");
+        assert_eq!(loaded, original);
+
+        let new_dir = tmp
+            .path()
+            .join("Library/Application Support/com.whisp2.app");
+        assert!(new_dir.join("config.json").exists());
+        assert_eq!(
+            std::fs::read(new_dir.join("history.db")).unwrap(),
+            b"db-bytes"
+        );
+        assert_eq!(
+            std::fs::read(new_dir.join("models/ggml-tiny.bin")).unwrap(),
+            b"model-bytes"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn migrate_does_not_clobber_existing_db_or_models() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        let old_dir = tmp
+            .path()
+            .join("Library/Application Support/com.whisp.whisp-rs");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        std::fs::write(
+            old_dir.join("config.json"),
+            serde_json::to_vec_pretty(&AppConfig::default()).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(old_dir.join("history.db"), b"old-db").unwrap();
+
+        let new_dir = tmp
+            .path()
+            .join("Library/Application Support/com.whisp2.app");
+        std::fs::create_dir_all(&new_dir).unwrap();
+        std::fs::write(new_dir.join("history.db"), b"new-db").unwrap();
+
+        let _ = load().expect("load");
+
+        // The pre-existing new history.db must be untouched.
+        assert_eq!(
+            std::fs::read(new_dir.join("history.db")).unwrap(),
+            b"new-db"
+        );
+    }
+}
