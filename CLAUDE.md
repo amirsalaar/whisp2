@@ -56,7 +56,7 @@ make ui-build     # tsc + vite build
 | `injection/text.rs` | CGEvent Unicode posting in 20-char UTF-16 chunks; terminal apps get longer delays |
 | `hud/panel.rs` | NSPanel-based floating HUD window (separate from the settings WebView) |
 | `config/models.rs` | `AppConfig`, `TranscriptionProvider`, `RecordingMode`, `HotkeyTrigger` |
-| `config/persistence.rs` | JSON config at `~/Library/Application Support/com.whisp.whisp-rs/config.json` |
+| `config/persistence.rs` | JSON config at `~/Library/Application Support/com.whisp2.app/config.json` |
 | `history/store.rs` | SQLite via sqlx; `history.db` in the app support dir |
 | `correction/dictionary.rs` | Whole-word substitutions applied post-transcription |
 | `keychain.rs` | macOS Keychain read/write for API keys (`openai_api_key`, `groq_api_key`, `gemini_api_key`) |
@@ -86,7 +86,7 @@ Tauri commands are the only IPC. Frontend calls `invoke("command_name", { ...arg
 
 ## Data Locations (macOS)
 
-- Config JSON: `~/Library/Application Support/com.whisp.whisp-rs/config.json`
-- History DB: `~/Library/Application Support/com.whisp.whisp-rs/history.db`
-- Downloaded Whisper models: `~/Library/Application Support/com.whisp.whisp-rs/models/`
-- API keys: macOS Keychain (service `com.whisp.whisp-rs`)
+- Config JSON: `~/Library/Application Support/com.whisp2.app/config.json`
+- History DB: `~/Library/Application Support/com.whisp2.app/history.db`
+- Downloaded Whisper models: `~/Library/Application Support/com.whisp2.app/models/`
+- API keys: macOS Keychain (service `com.whisp2.app`)

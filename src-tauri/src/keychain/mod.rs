@@ -3,7 +3,7 @@ use security_framework::passwords::{
     delete_generic_password, get_generic_password, set_generic_password,
 };
 
-const SERVICE: &str = "com.whisp.whisp-rs";
+const SERVICE: &str = "com.whisp2.app";
 
 pub fn set(key: &str, value: &str) -> Result<()> {
     set_generic_password(SERVICE, key, value.as_bytes())

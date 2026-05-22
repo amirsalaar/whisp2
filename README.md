@@ -70,10 +70,10 @@ Configurable from Settings. Supported keys: Right ⌘, Left ⌥, Right ⌥, Left
 
 ## Data & Privacy
 
-- Config: `~/Library/Application Support/com.whisp.whisp-rs/config.json`
-- History: `~/Library/Application Support/com.whisp.whisp-rs/history.db` (SQLite)
-- Whisper models: `~/Library/Application Support/com.whisp.whisp-rs/models/`
-- API keys: macOS Keychain (`com.whisp.whisp-rs`)
+- Config: `~/Library/Application Support/com.whisp2.app/config.json`
+- History: `~/Library/Application Support/com.whisp2.app/history.db` (SQLite)
+- Whisper models: `~/Library/Application Support/com.whisp2.app/models/`
+- API keys: macOS Keychain (`com.whisp2.app`)
 
 Audio is never stored to disk. When using cloud providers, audio is sent directly to the provider's API and discarded.
 
