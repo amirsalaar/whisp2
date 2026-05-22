@@ -4,6 +4,11 @@
   padding: 0;
 }
 
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
 :root {
   --bg: #f0ede8;
   --sidebar-bg: #e8e4de;
@@ -42,7 +47,7 @@ body {
 /* ── Layout ─────────────────────────────────────────────── */
 .app {
   display: flex;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
 }
 
@@ -863,11 +868,22 @@ body {
 /* ── iOS layout overrides ───────────────────────────────── */
 .app--ios {
   flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .app--ios .content {
+  flex: 1;
+  min-height: 0;
   padding: 20px 16px;
-  padding-bottom: 80px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Spacer at the bottom of content so last items aren't hidden under the fixed bar */
+.ios-scroll-spacer {
+  height: calc(240px + env(safe-area-inset-bottom));
+  flex-shrink: 0;
 }
 
 /* ── iOS bottom bar (record + tab strip) ─────────────────── */
@@ -986,5 +1002,111 @@ body {
 
 .ios-tab-btn.active .nav-icon {
   opacity: 1;
+}
+
+/* ── Paste-ready overlay (post-Action-Button capture) ───── */
+.paste-ready-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(26, 25, 23, 0.55);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: paste-fade-in 200ms ease-out;
+}
+
+@keyframes paste-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.paste-ready-card {
+  background: var(--card-bg);
+  border-radius: 20px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25), 0 6px 18px rgba(0, 0, 0, 0.12);
+  padding: 32px 24px 24px;
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: paste-slide-up 280ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes paste-slide-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.paste-ready-check {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 36px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.paste-ready-card h2 {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 400;
+  margin: 0 0 16px;
+  color: var(--text);
+}
+
+.paste-ready-preview {
+  width: 100%;
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 15px;
+  line-height: 1.45;
+  color: var(--text);
+  text-align: left;
+  max-height: 180px;
+  overflow-y: auto;
+  margin-bottom: 18px;
+  word-break: break-word;
+}
+
+.paste-ready-hint {
+  margin: 0 0 22px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.paste-ready-hint b {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.paste-ready-done {
+  width: 100%;
+  background: var(--accent);
+  color: var(--accent-fg);
+  border: none;
+  border-radius: 12px;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.paste-ready-done:active {
+  opacity: 0.85;
 }
 

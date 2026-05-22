@@ -203,6 +203,7 @@ export default function App() {
   const [inputDevices, setInputDevices] = useState<string[]>([]);
   const [platform, setPlatform] = useState<string | null>(null);
   const [mobileRecording, setMobileRecording] = useState<"idle" | "recording" | "processing">("idle");
+  const [pasteReady, setPasteReady] = useState<string | null>(null);
   const [installShortcutMsg, setInstallShortcutMsg] = useState<string | null>(null);
 
   const isIos = platform === "ios";
@@ -274,11 +275,13 @@ export default function App() {
       setDownloadProgress(e.payload);
     }).then((fn) => unlisteners.push(fn));
 
-    listen<string>("transcription_result", (_e) => {
-      invoke<HistoryEntry[]>("get_history", { limit: 100 }).then((entries) => {
-        setHistory(entries);
-        setTab("history");
-      });
+    listen<string>("transcription_result", (e) => {
+      const text = e.payload;
+      setPasteReady(text);
+      invoke<HistoryEntry[]>("get_history", { limit: 100 }).then(setHistory);
+      window.setTimeout(() => {
+        setPasteReady((cur) => (cur === text ? null : cur));
+      }, 8000);
     }).then((fn) => unlisteners.push(fn));
 
     listen<string>("recording_state_changed", (e) => {
@@ -420,6 +423,24 @@ export default function App() {
 
   return (
     <div className={`app${isIos ? " app--ios" : ""}`}>
+      {pasteReady !== null && (
+        <div className="paste-ready-overlay" onClick={() => setPasteReady(null)}>
+          <div className="paste-ready-card" onClick={(e) => e.stopPropagation()}>
+            <div className="paste-ready-check">✓</div>
+            <h2>Copied to clipboard</h2>
+            <div className="paste-ready-preview">{pasteReady}</div>
+            <p className="paste-ready-hint">
+              Open your app, long-press the text field, tap <b>Paste</b>.
+            </p>
+            <button
+              className="paste-ready-done"
+              onClick={() => setPasteReady(null)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
       {/* ── Sidebar (macOS only) ── */}
       {!isIos && <nav className="sidebar">
         <div className="brand">
@@ -1356,6 +1377,7 @@ export default function App() {
             )}
           </>
         )}
+        {isIos && <div className="ios-scroll-spacer" />}
       </main>
 
       {/* ── iOS bottom bar ── */}
