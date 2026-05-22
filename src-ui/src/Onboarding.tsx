@@ -251,9 +251,8 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
 
     let modelPath = cfg.local_whisper_model_path;
     if (provider === "local_whisper" && selectedModel) {
-      const dir = await invoke<string>("get_models_dir");
       const found = models.find((m) => m.name === selectedModel);
-      if (found) modelPath = `${dir}/${found.filename}`;
+      if (found) modelPath = found.filename;
     }
 
     await invoke("set_config", {

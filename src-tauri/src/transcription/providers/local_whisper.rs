@@ -18,6 +18,24 @@ pub struct LocalWhisperProvider {
 }
 
 impl LocalWhisperProvider {
+    /// Force-load the Whisper model into the cache without running inference.
+    /// Used to pre-warm the model during app startup so the first user-visible
+    /// transcription doesn't pay the ~1s mmap+Metal-warmup cost.
+    pub async fn ensure_loaded(&self) -> Result<()> {
+        let mut guard = self.ctx_cache.lock().await;
+        if guard.0.as_deref() != Some(&self.model_path) {
+            let path = self.model_path.clone();
+            let new_ctx = tokio::task::spawn_blocking(move || {
+                WhisperContext::new_with_params(&path, WhisperContextParameters::default())
+            })
+            .await?
+            .map_err(|e| anyhow::anyhow!("failed to load Whisper model: {e}"))?;
+            *guard = (Some(self.model_path.clone()), Some(Arc::new(new_ctx)));
+            tracing::info!("Whisper model pre-warmed: {}", self.model_path);
+        }
+        Ok(())
+    }
+
     pub async fn transcribe(&self, wav_bytes: Vec<u8>) -> Result<String> {
         // 1. Decode WAV (16-bit PCM, 16 kHz, mono) → f32 samples.
         //    encode_wav scales f32 → i16, so we reverse: i16 / i16::MAX → f32.

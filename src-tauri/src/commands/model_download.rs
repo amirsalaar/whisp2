@@ -63,6 +63,33 @@ fn models_dir() -> anyhow::Result<std::path::PathBuf> {
     Ok(dir)
 }
 
+/// Resolve a stored model path to an absolute path on disk.
+///
+/// We persist just the filename (e.g., `"ggml-tiny.bin"`) so it survives the
+/// iOS data-container UUID rotating on each Xcode reinstall. Legacy absolute
+/// paths still resolve to themselves for back-compat.
+pub fn resolve_model_path(stored: &str) -> anyhow::Result<std::path::PathBuf> {
+    let p = std::path::PathBuf::from(stored);
+    if p.is_absolute() {
+        return Ok(p);
+    }
+    Ok(models_dir()?.join(stored))
+}
+
+/// Return the filename of the first `.bin` model found in `models_dir()`,
+/// sorted alphabetically. Used on iOS to auto-pick a model after the data
+/// container UUID rotates and the saved absolute path is stale.
+pub fn scan_first_model_on_disk() -> anyhow::Result<Option<String>> {
+    let dir = models_dir()?;
+    let mut names: Vec<String> = std::fs::read_dir(&dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("bin"))
+        .filter_map(|e| e.file_name().to_str().map(|s| s.to_string()))
+        .collect();
+    names.sort();
+    Ok(names.into_iter().next())
+}
+
 #[derive(serde::Serialize, Clone)]
 struct DownloadProgress {
     model_name: String,
@@ -110,7 +137,7 @@ pub async fn download_whisper_model(
     let dest = dir.join(&info.filename);
 
     if dest.exists() {
-        return Ok(dest.to_string_lossy().into_owned());
+        return Ok(info.filename.clone());
     }
 
     // Reset abort flag for this download
@@ -174,7 +201,7 @@ pub async fn download_whisper_model(
         .await
         .map_err(|e| e.to_string())?;
 
-    Ok(dest.to_string_lossy().into_owned())
+    Ok(info.filename.clone())
 }
 
 #[tauri::command]

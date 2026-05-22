@@ -23,6 +23,7 @@ pub mod audio;
 pub mod commands;
 pub mod config;
 pub mod correction;
+pub mod ffi;
 pub mod history;
 pub mod hotkey;
 pub mod keychain;
@@ -691,8 +692,12 @@ pub fn run() {
                             matches!(keychain::get("groq_api_key"), Ok(None)),
                         TranscriptionProvider::Gemini =>
                             matches!(keychain::get("gemini_api_key"), Ok(None)),
-                        TranscriptionProvider::LocalWhisper =>
-                            cfg.local_whisper_model_path.is_none(),
+                        TranscriptionProvider::LocalWhisper => match cfg.local_whisper_model_path.as_deref() {
+                            None => true,
+                            Some(name) => !commands::model_download::resolve_model_path(name)
+                                .map(|p| p.exists())
+                                .unwrap_or(false),
+                        },
                     };
                     if needs_setup {
                         if let Some(w) = app.get_webview_window("settings") {
@@ -710,6 +715,62 @@ pub fn run() {
             builder = builder.setup(move |app| {
                 let app_handle = app.handle().clone();
                 tokio::spawn(spawn_mobile_audio_task(app_handle, state_arc.clone(), cmd_rx));
+
+                // iOS: auto-pick a model if the saved path is missing or stale
+                // (the data-container UUID rotates on every Xcode reinstall, which
+                // invalidates legacy absolute paths), then pre-warm the model so
+                // the first Action Button press doesn't pay the ~1s mmap + Metal
+                // warmup cost. Gated on provider == LocalWhisper to avoid pinning
+                // ~75 MB of resident memory for users on a cloud provider.
+                #[cfg(target_os = "ios")]
+                {
+                    use config::models::TranscriptionProvider;
+                    let cfg_now = state_arc.config.read().unwrap().clone();
+                    if matches!(cfg_now.provider, TranscriptionProvider::LocalWhisper) {
+                        let saved_ok = cfg_now
+                            .local_whisper_model_path
+                            .as_deref()
+                            .and_then(|s| commands::model_download::resolve_model_path(s).ok())
+                            .map(|p| p.exists())
+                            .unwrap_or(false);
+
+                        let resolved_name = if saved_ok {
+                            cfg_now.local_whisper_model_path.clone()
+                        } else {
+                            match commands::model_download::scan_first_model_on_disk() {
+                                Ok(Some(name)) => {
+                                    let mut new_cfg = cfg_now.clone();
+                                    new_cfg.local_whisper_model_path = Some(name.clone());
+                                    {
+                                        let mut w = state_arc.config.write().unwrap();
+                                        *w = new_cfg.clone();
+                                    }
+                                    if let Err(e) = config::persistence::save(&new_cfg) {
+                                        tracing::warn!("auto-pick save failed: {e}");
+                                    } else {
+                                        tracing::info!("auto-picked Whisper model: {name}");
+                                    }
+                                    Some(name)
+                                }
+                                Ok(None) => None,
+                                Err(e) => {
+                                    tracing::warn!("scan_first_model_on_disk failed: {e}");
+                                    None
+                                }
+                            }
+                        };
+
+                        if let Some(name) = resolved_name {
+                            let language = cfg_now.language.clone();
+                            tokio::spawn(async move {
+                                if let Err(e) = crate::ffi::warm_local_whisper(name, language).await {
+                                    tracing::warn!("Whisper pre-warm failed: {e}");
+                                }
+                            });
+                        }
+                    }
+                }
+
                 Ok(())
             });
         }

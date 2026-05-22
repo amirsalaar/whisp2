@@ -47,13 +47,15 @@ pub async fn transcribe(
                 .await
         }
         TranscriptionProvider::LocalWhisper => {
-            let model_path = config
+            let stored = config
                 .local_whisper_model_path
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!(
                     "No model file selected. Choose a GGML .bin file in Settings → Local Whisper."
-                ))?
-                .clone();
+                ))?;
+            let model_path = crate::commands::model_download::resolve_model_path(stored)?
+                .to_string_lossy()
+                .into_owned();
             let provider = LocalWhisperProvider {
                 model_path,
                 ctx_cache: whisper_ctx,

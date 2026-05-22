@@ -378,9 +378,7 @@ export default function App() {
 
   async function selectDownloadedModel(m: ModelInfo) {
     if (!config) return;
-    const dir = await invoke<string>("get_models_dir");
-    const path = `${dir}/${m.filename}`;
-    const updated = { ...config, local_whisper_model_path: path };
+    const updated = { ...config, local_whisper_model_path: m.filename };
     setConfig(updated);
     await invoke("set_config", { config: updated });
   }
