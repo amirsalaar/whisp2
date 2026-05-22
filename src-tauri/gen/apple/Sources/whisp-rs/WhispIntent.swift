@@ -24,17 +24,6 @@ struct WhispRecordIntent: AppIntent {
         let (text, provider) = try await recorder.recordAndTranscribe()
         NSLog("[WhispIntent] transcription complete: %d chars", text.count)
 
-        // Hand off the text to the Rust polling loop via the shared app group
-        // UserDefaults. The Rust side gates the UIPasteboard write on
-        // applicationState == .active and retries every 250ms until the write
-        // succeeds, then clears the key. This is the only reliable way past
-        // UIKit's silent-drop of pasteboard writes from non-.active processes.
-        if let defaults = UserDefaults(suiteName: "group.com.whisp2.app") {
-            defaults.set(text, forKey: "pending_transcription")
-            defaults.synchronize()
-            NSLog("[WhispIntent] handed off to Rust loop: %d chars", text.count)
-        }
-
         // Haptic + sound work in any app state — these don't gate on .active.
         await MainActor.run {
             UINotificationFeedbackGenerator().notificationOccurred(.success)

@@ -74,8 +74,6 @@ objc2-foundation = { version = "0.3", features = [
   "NSNotification",
   "NSUserDefaults",
   "NSGeometry",
-  "NSBundle",
-  "NSURL",
   "objc2-core-foundation",
 ] }
 
@@ -91,13 +89,6 @@ async-trait = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["rt", "macros"] }
 tempfile = "3"
-
-[target.'cfg(target_os = "ios")'.dependencies]
-objc2-ui-kit = { version = "0.3", features = ["UIPasteboard", "UIApplication"] }
-# Routes Rust logs through Apple's unified logging system so they reach
-# idevicesyslog (Rust eprintln/stdout/stderr is silently dropped on iOS).
-oslog = "0.2"
-log = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 # macOS low-level bindings (CGEventTap, NSPanel, etc.)

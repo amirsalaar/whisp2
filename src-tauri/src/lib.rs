@@ -28,35 +28,6 @@ pub mod hotkey;
 pub mod keychain;
 pub mod transcription;
 
-// iOS logging: stderr/stdout from Rust is silently dropped on iOS, so route
-// everything through Apple's os_log via the `oslog` crate. Captured by
-// idevicesyslog and Console.app under subsystem "com.whisp2.app".
-#[cfg(target_os = "ios")]
-mod ios_log {
-    use std::sync::Once;
-    static INIT: Once = Once::new();
-
-    pub fn init() {
-        INIT.call_once(|| {
-            // Bridges the `log` crate to os_log; we then use log::info! style
-            // calls (or our ios_log! macro) instead of eprintln!.
-            let _ = oslog::OsLogger::new("com.whisp2.app")
-                .level_filter(log::LevelFilter::Info)
-                .init();
-        });
-    }
-}
-
-#[cfg(target_os = "ios")]
-macro_rules! ios_log {
-    ($($arg:tt)*) => { log::info!(target: "whisp-rs", $($arg)*) };
-}
-#[cfg(not(target_os = "ios"))]
-#[allow(unused_macros)]
-macro_rules! ios_log {
-    ($($arg:tt)*) => { () };
-}
-
 #[cfg(target_os = "macos")]
 pub mod app_context;
 #[cfg(target_os = "macos")]
@@ -574,81 +545,6 @@ async fn spawn_mobile_audio_task(
     }
 }
 
-/// Reads `pending_transcription` from the shared app group UserDefaults (written by WhispIntent
-/// after an Action Button transcription), emits `transcription_result` so the frontend can copy
-/// it to clipboard, then clears the key so it's only processed once.
-#[cfg(target_os = "ios")]
-fn check_pending_transcription(app_handle: &tauri::AppHandle) {
-    use objc2::AllocAnyThread;
-    use objc2_foundation::{NSString, NSUserDefaults};
-    use tauri::Emitter;
-
-    let suite_name = "group.com.whisp2.app";
-    let key = "pending_transcription";
-
-    let suite = NSString::from_str(suite_name);
-    let defaults = match NSUserDefaults::initWithSuiteName(NSUserDefaults::alloc(), Some(&suite)) {
-        Some(d) => d,
-        None => {
-            ios_log!("poll: app group UserDefaults unavailable");
-            return;
-        }
-    };
-
-    let ns_key = NSString::from_str(key);
-    let text_str = match defaults.stringForKey(&ns_key) {
-        Some(t) => t.to_string(),
-        None => return, // no key — nothing to do, stay quiet to avoid log spam
-    };
-    if text_str.is_empty() {
-        return;
-    }
-    ios_log!("poll: pending_transcription found chars={}", text_str.len());
-
-    // UIPasteboard is silently dropped when applicationState != .active. Gate the write
-    // on the main thread, and only clear the UserDefaults key after a confirmed
-    // active-state write so the next poll can retry if we caught it mid-launch.
-    let app_handle_clone = app_handle.clone();
-    let text_for_pb = text_str;
-    let _ = app_handle.run_on_main_thread(move || {
-        use objc2::MainThreadMarker;
-        use objc2_foundation::NSString;
-        use objc2_ui_kit::{UIApplication, UIApplicationState, UIPasteboard};
-
-        // SAFETY: we're inside run_on_main_thread, so we are on the main thread.
-        let mtm = unsafe { MainThreadMarker::new_unchecked() };
-        let app = UIApplication::sharedApplication(mtm);
-        let state = app.applicationState();
-        let state_raw = state.0;
-        if state != UIApplicationState::Active {
-            ios_log!(
-                "pasteboard deferred state_raw={} chars={}",
-                state_raw,
-                text_for_pb.len()
-            );
-            return;
-        }
-
-        let pb = UIPasteboard::generalPasteboard();
-        let ns_text = NSString::from_str(&text_for_pb);
-        unsafe { pb.setString(Some(&ns_text)); }
-        ios_log!(
-            "pasteboard written chars={} state_raw={}",
-            text_for_pb.len(),
-            state_raw
-        );
-
-        let suite = NSString::from_str("group.com.whisp2.app");
-        if let Some(d) = NSUserDefaults::initWithSuiteName(NSUserDefaults::alloc(), Some(&suite)) {
-            let k = NSString::from_str("pending_transcription");
-            d.removeObjectForKey(&k);
-            let _ = d.synchronize();
-        }
-
-        let _ = app_handle_clone.emit("transcription_result", &text_for_pb);
-    });
-}
-
 /// App entry point called by both `main.rs` (desktop) and the iOS/Android mobile_entry_point.
 /// All Tauri builder setup lives here so the iOS linker can find the required runtime symbols.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -813,35 +709,7 @@ pub fn run() {
         {
             builder = builder.setup(move |app| {
                 let app_handle = app.handle().clone();
-                tokio::spawn(spawn_mobile_audio_task(app_handle.clone(), state_arc.clone(), cmd_rx));
-                // Poll for pending Action Button transcriptions written by WhispIntent.
-                // RunEvent::Resumed fires before the AppIntent finishes, so polling is required.
-                // The polled fn gates the pasteboard write on applicationState == .active and
-                // only clears the UserDefaults key after a successful write — so this loop is
-                // also the retry mechanism for the cold-launch race.
-                #[cfg(target_os = "ios")]
-                {
-                    crate::ios_log::init();
-                    ios_log!("setup: ios poll task about to spawn");
-                    let ah_poll = app_handle.clone();
-                    tokio::spawn(async move {
-                        ios_log!("ios poll task spawned (250ms interval)");
-                        let mut interval = tokio::time::interval(
-                            std::time::Duration::from_millis(250)
-                        );
-                        let mut tick_count: u64 = 0;
-                        loop {
-                            interval.tick().await;
-                            tick_count += 1;
-                            // Heartbeat every 4s so we can confirm the task is alive
-                            // without spamming logs every 250ms.
-                            if tick_count % 16 == 0 {
-                                ios_log!("poll heartbeat tick={}", tick_count);
-                            }
-                            check_pending_transcription(&ah_poll);
-                        }
-                    });
-                }
+                tokio::spawn(spawn_mobile_audio_task(app_handle, state_arc.clone(), cmd_rx));
                 Ok(())
             });
         }
