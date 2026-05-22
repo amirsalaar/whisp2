@@ -166,4 +166,68 @@ private extension Data {
         append("--\(boundary)--\r\n".data(using: .utf8)!)
     }
 }
+
+// MARK: - Shortcut installer (UIDocumentInteractionController)
+
+// UIApplication.openURL on a file:// URL inside the app bundle is sandbox-blocked
+// cross-app, so Shortcuts can't read the bundled .shortcut directly. The supported
+// path is to copy the file to a readable location (Documents/) and present a
+// UIDocumentInteractionController "Open in…" sheet anchored on the key window.
+@available(iOS 16.0, *)
+private final class WhispShortcutInstaller: NSObject, UIDocumentInteractionControllerDelegate {
+    static let shared = WhispShortcutInstaller()
+
+    private var interaction: UIDocumentInteractionController?
+
+    func present() -> Bool {
+        guard let bundleURL = Bundle.main.url(forResource: "RecordAndTranscribe", withExtension: "shortcut", subdirectory: "assets")
+            ?? Bundle.main.url(forResource: "RecordAndTranscribe", withExtension: "shortcut") else {
+            NSLog("[WhispShortcutInstaller] bundled .shortcut not found")
+            return false
+        }
+
+        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let dest = docs.appendingPathComponent("RecordAndTranscribe.shortcut")
+        do {
+            if FileManager.default.fileExists(atPath: dest.path) {
+                try FileManager.default.removeItem(at: dest)
+            }
+            try FileManager.default.copyItem(at: bundleURL, to: dest)
+        } catch {
+            NSLog("[WhispShortcutInstaller] copy failed: %@", error.localizedDescription)
+            return false
+        }
+
+        guard let scene = UIApplication.shared.connectedScenes
+            .first(where: { $0.activationState == .foregroundActive }) as? UIWindowScene,
+            let window = scene.windows.first(where: { $0.isKeyWindow }) ?? scene.windows.first,
+            let rootVC = window.rootViewController else {
+            NSLog("[WhispShortcutInstaller] no foreground window")
+            return false
+        }
+
+        let dic = UIDocumentInteractionController(url: dest)
+        dic.uti = "com.apple.shortcut"
+        dic.delegate = self
+        self.interaction = dic
+
+        let presented = dic.presentOpenInMenu(from: rootVC.view.bounds, in: rootVC.view, animated: true)
+        if !presented {
+            NSLog("[WhispShortcutInstaller] presentOpenInMenu returned false (no apps registered for .shortcut)")
+            self.interaction = nil
+            return false
+        }
+        return true
+    }
+
+    func documentInteractionControllerDidDismissOpenInMenu(_ controller: UIDocumentInteractionController) {
+        self.interaction = nil
+    }
+}
+
+@available(iOS 16.0, *)
+@_cdecl("whisp_present_shortcut_installer")
+public func whisp_present_shortcut_installer() -> Bool {
+    return WhispShortcutInstaller.shared.present()
+}
 #endif

@@ -5,3 +5,4 @@ pub mod history;
 pub mod hud;
 pub mod model_download;
 pub mod permissions;
+pub mod shortcut;

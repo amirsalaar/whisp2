@@ -625,6 +625,7 @@ pub fn run() {
                 commands::audio::start_recording_mobile,
                 commands::audio::stop_recording_mobile,
                 commands::config::get_platform,
+                commands::shortcut::install_shortcut,
             ]);
 
         #[cfg(target_os = "macos")]

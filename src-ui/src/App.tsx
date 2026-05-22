@@ -203,6 +203,7 @@ export default function App() {
   const [inputDevices, setInputDevices] = useState<string[]>([]);
   const [platform, setPlatform] = useState<string | null>(null);
   const [mobileRecording, setMobileRecording] = useState<"idle" | "recording" | "processing">("idle");
+  const [installShortcutMsg, setInstallShortcutMsg] = useState<string | null>(null);
 
   const isIos = platform === "ios";
 
@@ -1028,6 +1029,48 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {isIos && (
+              <div className="section-group">
+                <div className="section-label">Action Button</div>
+                <div className="settings-card">
+                  <div className="settings-row">
+                    <div className="row-label">
+                      <span className="row-title">Install Shortcut</span>
+                      <span className="row-desc">
+                        Adds a Shortcut that records, transcribes, and copies the
+                        result to your clipboard. Bind it in iOS Settings → Action
+                        Button → Shortcut.
+                      </span>
+                    </div>
+                    <div className="row-control">
+                      <button
+                        className="btn-secondary"
+                        onClick={async () => {
+                          setInstallShortcutMsg("Opening Shortcuts…");
+                          try {
+                            await invoke("install_shortcut");
+                            setInstallShortcutMsg("Opened Shortcuts.");
+                          } catch (e) {
+                            setInstallShortcutMsg(`Install failed: ${e}`);
+                          }
+                        }}
+                      >
+                        Install…
+                      </button>
+                    </div>
+                  </div>
+                  {installShortcutMsg && (
+                    <div
+                      className="settings-row"
+                      style={{ paddingTop: 0, color: "var(--text-secondary, #888)", fontSize: 13 }}
+                    >
+                      {installShortcutMsg}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="save-row">
               <button
