@@ -57,3 +57,30 @@ fmt:
 # Clippy lints
 lint-rs:
 	$(CARGO) clippy -- -D warnings
+
+# ── iOS ──────────────────────────────────────────────────────────────────────
+
+.PHONY: ios-dev ios-build ios-typecheck ios-regen
+
+# iOS dev session on a connected, unlocked device
+ios-dev:
+	$(CARGO) tauri ios dev
+
+# iOS release build
+ios-build:
+	$(CARGO) tauri ios build
+
+# Swift typecheck of iOS sources (host app + Live Activity shared files)
+ios-typecheck:
+	cd src-tauri/gen/apple && \
+	xcrun -sdk iphonesimulator swiftc -typecheck \
+	  -target arm64-apple-ios17.0-simulator \
+	  -sdk "$$(xcrun --sdk iphonesimulator --show-sdk-path)" \
+	  Shared/WhispActivityAttributes.swift \
+	  Shared/WhispStopIntent.swift \
+	  Sources/whisp-rs/WhispIntent.swift
+
+# Clean-regen Xcode project from project.yml (in-place merges have stale-state bugs)
+ios-regen:
+	rm -rf src-tauri/gen/apple/whisp-rs.xcodeproj
+	cd src-tauri/gen/apple && xcodegen generate
