@@ -636,6 +636,7 @@ pub fn run() {
                 commands::audio::start_recording_mobile,
                 commands::audio::stop_recording_mobile,
                 commands::config::get_platform,
+                commands::config::reset_app_data,
                 commands::shortcut::install_shortcut,
             ]);
 

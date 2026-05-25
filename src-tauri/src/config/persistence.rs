@@ -35,7 +35,7 @@ pub fn app_support_dir() -> Result<PathBuf> {
     }
 }
 
-fn config_path() -> Result<PathBuf> {
+pub fn config_path() -> Result<PathBuf> {
     Ok(app_support_dir()?.join("config.json"))
 }
 

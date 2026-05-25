@@ -411,6 +411,31 @@ body {
   border-color: rgba(0,0,0,0.2);
 }
 
+.btn-danger {
+  background: #c0392b;
+  color: #fff;
+  border: 1px solid #a4291c;
+  border-radius: 7px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  font-weight: 500;
+  cursor: pointer;
+  letter-spacing: -0.01em;
+  transition: background 0.12s, opacity 0.12s;
+}
+.btn-danger:hover { background: #a4291c; }
+.btn-danger:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.settings-section.danger-zone {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.settings-section.danger-zone .section-title {
+  color: #c0392b;
+}
+
 .btn-ghost {
   background: none;
   border: none;

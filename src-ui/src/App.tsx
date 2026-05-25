@@ -388,6 +388,34 @@ export default function App() {
     setHistory([]);
   }
 
+  async function resetAppData() {
+    const confirmed = window.confirm(
+      "This will permanently delete:\n\n" +
+        "• All downloaded Whisper models\n" +
+        "• All transcription history\n" +
+        "• All settings and API keys\n\n" +
+        "The app will return to a fresh-install state. Continue?",
+    );
+    if (!confirmed) return;
+    setSaving(true);
+    try {
+      await invoke("reset_app_data");
+      const fresh = await invoke<AppConfig>("get_config");
+      setConfig(fresh);
+      setHistory([]);
+      setOpenaiKey("");
+      setGroqKey("");
+      setGeminiKey("");
+      setDownloadedModels([]);
+      setStatusMsg("All data cleared.");
+      setTimeout(() => setStatusMsg(""), 2500);
+    } catch (e) {
+      setStatusMsg(`Reset failed: ${e}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function copyEntry(id: string, text: string) {
     await navigator.clipboard.writeText(text);
     setCopiedId(id);
@@ -1100,6 +1128,28 @@ export default function App() {
                 {saving ? "Saving…" : "Save Settings"}
               </button>
               {statusMsg && <span className="status">{statusMsg}</span>}
+            </div>
+
+            <div className="settings-section danger-zone">
+              <div className="section-header">
+                <h2 className="section-title">Danger Zone</h2>
+              </div>
+              <div className="settings-row">
+                <div className="row-label">
+                  <div className="label-text">Reset all app data</div>
+                  <div className="label-hint">
+                    Deletes downloaded models, history, settings, and API keys.
+                    Returns the app to a fresh-install state.
+                  </div>
+                </div>
+                <button
+                  className="btn-danger"
+                  onClick={resetAppData}
+                  disabled={saving}
+                >
+                  Reset Everything
+                </button>
+              </div>
             </div>
           </>
         )}

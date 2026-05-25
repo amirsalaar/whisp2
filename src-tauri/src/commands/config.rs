@@ -63,6 +63,53 @@ pub fn open_model_url() {
         .spawn();
 }
 
+/// Wipe all user data: downloaded models, transcription history, config file,
+/// and Keychain-stored API keys. Resets the in-memory config to defaults and
+/// invalidates the cached WhisperContext. Hotkey/tray keep running, but the
+/// next launch (or settings re-open) starts as if first install.
+#[tauri::command]
+pub async fn reset_app_data(state: State<'_, AppState>) -> Result<(), String> {
+    use std::fs;
+
+    // 1. History table
+    crate::history::store::delete_all(&state.db)
+        .await
+        .map_err(|e| format!("clear history: {e}"))?;
+
+    // 2. Models directory — delete *.bin only, leave the dir
+    if let Ok(dir) = persistence::app_support_dir().map(|d| d.join("models")) {
+        if dir.exists() {
+            for entry in fs::read_dir(&dir).map_err(|e| format!("read models dir: {e}"))? {
+                let entry = entry.map_err(|e| e.to_string())?;
+                if entry.path().extension().and_then(|s| s.to_str()) == Some("bin") {
+                    let _ = fs::remove_file(entry.path());
+                }
+            }
+        }
+    }
+
+    // 3. Config file — delete so next load returns defaults
+    if let Ok(p) = persistence::config_path() {
+        let _ = fs::remove_file(&p);
+    }
+
+    // 4. In-memory config + cached Whisper model
+    {
+        let mut lock = state.config.write().unwrap();
+        *lock = AppConfig::default();
+    }
+    if let Ok(mut ctx) = state.whisper_ctx.try_lock() {
+        *ctx = (None, None);
+    }
+
+    // 5. Keychain — best-effort, ignore not-found
+    for key in ["openai_api_key", "groq_api_key", "gemini_api_key"] {
+        let _ = crate::keychain::delete(key);
+    }
+
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_platform() -> &'static str {
     #[cfg(target_os = "macos")]
