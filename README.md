@@ -8,6 +8,8 @@ macOS menu bar app + iOS app for voice-to-text. Hold a hotkey (or press the iPho
 
 Built with [Tauri 2](https://tauri.app) (Rust + React, plus a Swift Live Activity extension), targeting macOS 13+ and iOS 17+.
 
+> ⚠️ **iOS is unofficial.** The iPhone build is for developers who want to build and run it locally via Xcode. There's no TestFlight or App Store distribution, no signed `.ipa`, no support guarantees. The macOS app is the supported product.
+
 ## Why
 
 Wispr Flow is $15/mo. Superwhisper is $9/mo. The actual hard part — typing text into another app without using the clipboard — is a few hundred lines of `CGEvent` and AVFoundation.
@@ -41,9 +43,10 @@ Whisp is the same workflow, free, open-source, with your choice of cloud provide
 - Apple Silicon (aarch64)
 - Three system permissions: **Accessibility**, **Input Monitoring**, **Microphone**
 
-**iOS (optional):**
+**iOS (developer build only — no official distribution):**
 - iOS 17+
 - iPhone 15 Pro or later (Action Button)
+- Apple Developer account + Xcode (you build and sign it yourself)
 
 ## Installation
 
