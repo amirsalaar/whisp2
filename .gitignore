@@ -5,3 +5,4 @@ src-ui/dist/
 .env
 src-tauri/gen/apple/build/
 src-tauri/gen/apple/Externals/
+.gstack/
