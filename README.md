@@ -8,6 +8,22 @@ macOS menu bar app + iOS app for voice-to-text. Hold a hotkey (or press the iPho
 
 Built with [Tauri 2](https://tauri.app) (Rust + React, plus a Swift Live Activity extension), targeting macOS 13+ and iOS 17+.
 
+## Why
+
+Wispr Flow is $15/mo. Superwhisper is $9/mo. The actual hard part — typing text into another app without using the clipboard — is a few hundred lines of `CGEvent` and AVFoundation.
+
+Whisp is the same workflow, free, open-source, with your choice of cloud provider or fully on-device transcription. Bring your own API key (stored in the Keychain, never on disk) or run locally with Whisper GGML.
+
+| | Whisp | Wispr Flow | Superwhisper |
+|---|---|---|---|
+| Price | **Free** | $15/mo | $9/mo |
+| Source available | ✅ MIT | ❌ | ❌ |
+| Bring-your-own API key | ✅ | ❌ | ✅ |
+| 100% on-device option | ✅ Local Whisper (GGML) | ❌ | ✅ |
+| iPhone Action Button + Live Activity | ✅ | ❌ | ❌ |
+| Audio never stored to disk | ✅ | — | — |
+| Inject text without clipboard | ✅ CGEvent Unicode | ✅ | ✅ |
+
 ## Features
 
 - **Press-and-hold or toggle** recording mode
@@ -20,9 +36,14 @@ Built with [Tauri 2](https://tauri.app) (Rust + React, plus a Swift Live Activit
 
 ## Requirements
 
+**macOS:**
 - macOS 13+
 - Apple Silicon (aarch64)
 - Three system permissions: **Accessibility**, **Input Monitoring**, **Microphone**
+
+**iOS (optional):**
+- iOS 17+
+- iPhone 15 Pro or later (Action Button)
 
 ## Installation
 
@@ -80,6 +101,16 @@ Configurable from Settings. Supported keys: Right ⌘, Left ⌥, Right ⌥, Left
 - API keys: macOS Keychain (`com.whisp2.app`)
 
 Audio is never stored to disk. When using cloud providers, audio is sent directly to the provider's API and discarded.
+
+## Contributing
+
+PRs welcome. Good places to start:
+
+- iOS Gemini provider implementation (`src-tauri/gen/apple/Sources/whisp-rs/WhispIntent.swift`)
+- Linux build target
+- Dictionary UX in the settings window
+
+See [CLAUDE.md](CLAUDE.md) for the architecture overview.
 
 ## License
 
