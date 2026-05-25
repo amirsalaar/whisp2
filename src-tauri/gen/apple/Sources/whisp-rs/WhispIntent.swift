@@ -470,9 +470,13 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
             return ProviderConfig(apiKey: key, baseURL: snap.groqURL, model: snap.groqModel,
                                   provider: "groq", localModelPath: nil, language: snap.language)
         case "gemini":
-            guard let key = readKeychainKey("gemini_api_key") else { throw WhispError.noApiKey }
-            return ProviderConfig(apiKey: key, baseURL: snap.openaiURL, model: snap.openaiModel,
-                                  provider: "gemini", localModelPath: nil, language: snap.language)
+            // Gemini uses a different API shape (generateContent, not multipart)
+            // and a different auth header (x-goog-api-key, not Bearer). The
+            // iOS transcribe path only speaks the OpenAI multipart shape, so
+            // routing Gemini through it would send the Google key as a Bearer
+            // token to OpenAI's endpoint. Reject cleanly until iOS gets a real
+            // Gemini implementation.
+            throw WhispError.apiFailed("Gemini is not yet supported on iOS. Pick OpenAI, Groq, or Local Whisper in Settings.")
         case "local_whisper":
             guard let stored = snap.localModelPath, !stored.isEmpty else {
                 throw WhispError.localWhisperModelMissing
