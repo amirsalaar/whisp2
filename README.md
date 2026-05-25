@@ -1,8 +1,12 @@
+<p align="center">
+  <img src="docs/banner.svg" alt="Whisp — voice to text on macOS and iOS" width="100%">
+</p>
+
 # Whisp2
 
-macOS menu bar app for voice-to-text. Hold a hotkey, speak, release — transcribed text is typed directly into whatever app you're using. No clipboard. No switching windows.
+macOS menu bar app + iOS app for voice-to-text. Hold a hotkey (or press the iPhone Action Button), speak, release — transcribed text is typed directly into whatever app you're using. No clipboard. No switching windows.
 
-Built with [Tauri 2](https://tauri.app) (Rust + React), targeting macOS 13+.
+Built with [Tauri 2](https://tauri.app) (Rust + React, plus a Swift Live Activity extension), targeting macOS 13+ and iOS 17+.
 
 ## Features
 

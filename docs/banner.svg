@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif">
+  <rect width="1280" height="640" fill="#f0ede8"/>
+
+  <!-- top corner ticks: tiny structural marks -->
+  <rect x="48" y="48" width="14" height="2" fill="#1a1917"/>
+  <rect x="48" y="48" width="2" height="14" fill="#1a1917"/>
+  <rect x="1218" y="48" width="14" height="2" fill="#1a1917"/>
+  <rect x="1230" y="48" width="2" height="14" fill="#1a1917"/>
+  <rect x="48" y="590" width="14" height="2" fill="#1a1917"/>
+  <rect x="48" y="578" width="2" height="14" fill="#1a1917"/>
+  <rect x="1218" y="590" width="14" height="2" fill="#1a1917"/>
+  <rect x="1230" y="578" width="2" height="14" fill="#1a1917"/>
+
+  <!-- meta line -->
+  <text x="64" y="92" font-size="14" fill="#8a8580" font-family="ui-monospace, 'SF Mono', Menlo, monospace" letter-spacing="2">
+    WHISP2 // VOICE → TEXT // MACOS + IOS
+  </text>
+
+  <!-- wordmark -->
+  <text x="64" y="288" font-size="220" font-weight="800" fill="#1a1917" letter-spacing="-8">
+    Whisp.
+  </text>
+
+  <!-- waveform bars -->
+  <g transform="translate(64, 340)">
+    <rect x="0"   y="34" width="6" height="32"  fill="#1a1917"/>
+    <rect x="14"  y="22" width="6" height="56"  fill="#1a1917"/>
+    <rect x="28"  y="10" width="6" height="80"  fill="#1a1917"/>
+    <rect x="42"  y="18" width="6" height="64"  fill="#1a1917"/>
+    <rect x="56"  y="0"  width="6" height="100" fill="#1a1917"/>
+    <rect x="70"  y="14" width="6" height="72"  fill="#1a1917"/>
+    <rect x="84"  y="6"  width="6" height="88"  fill="#e8a928"/>
+    <rect x="98"  y="20" width="6" height="60"  fill="#1a1917"/>
+    <rect x="112" y="30" width="6" height="40"  fill="#1a1917"/>
+    <rect x="126" y="38" width="6" height="24"  fill="#1a1917"/>
+    <rect x="140" y="44" width="6" height="12"  fill="#1a1917"/>
+    <rect x="154" y="46" width="6" height="8"   fill="#1a1917"/>
+    <!-- arrow -->
+    <line x1="180" y1="50" x2="244" y2="50" stroke="#1a1917" stroke-width="2"/>
+    <polyline points="234,42 244,50 234,58" fill="none" stroke="#1a1917" stroke-width="2"/>
+    <!-- typed output -->
+    <text x="262" y="62" font-size="44" fill="#1a1917" font-family="ui-monospace, 'SF Mono', Menlo, monospace" letter-spacing="-1">
+      "ship it tomorrow."
+    </text>
+    <!-- cursor -->
+    <rect x="638" y="22" width="3" height="48" fill="#1a1917">
+      <animate attributeName="opacity" values="1;1;0;0" dur="1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- value prop -->
+  <text x="64" y="498" font-size="34" fill="#1a1917" font-weight="500">
+    Hold a hotkey. Speak. Release.
+  </text>
+  <text x="64" y="540" font-size="34" fill="#8a8580" font-weight="400">
+    Text is typed straight into the app you're already in.
+  </text>
+
+  <!-- footer strip -->
+  <line x1="64" y1="572" x2="1216" y2="572" stroke="#1a1917" stroke-width="1"/>
+  <text x="64" y="608" font-size="13" fill="#1a1917" font-family="ui-monospace, 'SF Mono', Menlo, monospace" letter-spacing="2">
+    OPENAI · GROQ · GEMINI · LOCAL WHISPER
+  </text>
+  <text x="1216" y="608" font-size="13" fill="#1a1917" font-family="ui-monospace, 'SF Mono', Menlo, monospace" letter-spacing="2" text-anchor="end">
+    NO CLIPBOARD. NO LATENCY. NO BS.
+  </text>
+</svg>
