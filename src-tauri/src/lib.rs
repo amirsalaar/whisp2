@@ -596,6 +596,16 @@ pub fn run() {
         let mut builder = tauri::Builder::default()
             .plugin(tauri_plugin_dialog::init())
             .manage(app_state)
+            .on_window_event(|window, event| {
+                // Closing the settings window must not quit the app — we live in
+                // the menu bar. Hide instead and prevent the default close.
+                if window.label() == "settings" {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        api.prevent_close();
+                        let _ = window.hide();
+                    }
+                }
+            })
             .invoke_handler(tauri::generate_handler![
                 commands::config::get_config,
                 commands::config::set_config,
