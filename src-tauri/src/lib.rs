@@ -596,13 +596,14 @@ pub fn run() {
         let mut builder = tauri::Builder::default()
             .plugin(tauri_plugin_dialog::init())
             .manage(app_state)
-            .on_window_event(|window, event| {
+            .on_window_event(|_window, _event| {
                 // Closing the settings window must not quit the app — we live in
                 // the menu bar. Hide instead and prevent the default close.
-                if window.label() == "settings" {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                #[cfg(target_os = "macos")]
+                if _window.label() == "settings" {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = _event {
                         api.prevent_close();
-                        let _ = window.hide();
+                        let _ = _window.hide();
                     }
                 }
             })
