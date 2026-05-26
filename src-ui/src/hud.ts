@@ -1,4 +1,4 @@
-import { listen } from '@tauri-apps/api/event';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
 
 type HudState =
@@ -218,6 +218,10 @@ function setState(state: HudState, label?: string): void {
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 
+const unlisteners: UnlistenFn[] = [];
+let mouseEnterHandler: (() => void) | null = null;
+let mouseLeaveHandler: (() => void) | null = null;
+
 async function init(): Promise<void> {
   renderState('collapsed-idle');
   document.body.style.opacity = '1';
@@ -228,14 +232,16 @@ async function init(): Promise<void> {
   // The global NSEvent monitor in Rust goes silent when the cursor is inside our
   // own window, so we use browser mouseenter/mouseleave on <html> as the
   // reliable trigger. The window already has setIgnoresMouseEvents:NO so these fire.
-  document.documentElement.addEventListener('mouseenter', () => {
+  mouseEnterHandler = () => {
     if (currentState === 'collapsed-idle') setState('expanded-idle');
-  });
-  document.documentElement.addEventListener('mouseleave', () => {
+  };
+  mouseLeaveHandler = () => {
     if (currentState === 'expanded-idle') setState('collapsed-idle');
-  });
+  };
+  document.documentElement.addEventListener('mouseenter', mouseEnterHandler);
+  document.documentElement.addEventListener('mouseleave', mouseLeaveHandler);
 
-  await listen<string>('hud_state', (event) => {
+  unlisteners.push(await listen<string>('hud_state', (event) => {
     const raw = event.payload;
     // Support "expanded-idle:Click to allow microphone" payload format
     const colonIdx = raw.indexOf(':');
@@ -247,12 +253,30 @@ async function init(): Promise<void> {
       const state = raw as HudState;
       if (ALL_STATES.includes(state)) setState(state);
     }
-  });
+  }));
 
-  await listen<number>('audio_level', (event) => {
+  unlisteners.push(await listen<number>('audio_level', (event) => {
     currentLevel = Math.min(Math.max(event.payload, 0), 1);
-  });
+  }));
+}
 
+function dispose(): void {
+  if (mouseEnterHandler) {
+    document.documentElement.removeEventListener('mouseenter', mouseEnterHandler);
+    mouseEnterHandler = null;
+  }
+  if (mouseLeaveHandler) {
+    document.documentElement.removeEventListener('mouseleave', mouseLeaveHandler);
+    mouseLeaveHandler = null;
+  }
+  while (unlisteners.length) {
+    const fn = unlisteners.pop();
+    if (fn) fn();
+  }
 }
 
 init().catch(console.error);
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => dispose());
+}
