@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./Onboarding.css";
@@ -140,6 +140,13 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const step = STEPS[stepIdx];
   const progressPct = Math.round((stepIdx / (STEPS.length - 1)) * 100);
 
+  const micTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (micTimerRef.current) clearTimeout(micTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     invoke<boolean>("check_microphone").then(setMicGranted);
     invoke<boolean>("check_accessibility").then(setAccessibility);
@@ -190,7 +197,8 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   async function requestMic() {
     setMicRequesting(true);
     await invoke("request_microphone");
-    setTimeout(async () => {
+    micTimerRef.current = setTimeout(async () => {
+      micTimerRef.current = null;
       const ok = await invoke<boolean>("check_microphone");
       setMicGranted(ok);
       setMicRequesting(false);

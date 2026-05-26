@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -208,6 +208,24 @@ export default function App() {
 
   const isIos = platform === "ios";
 
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const trackTimeout = (fn: () => void, ms: number) => {
+    const id = setTimeout(() => {
+      timersRef.current.delete(id);
+      fn();
+    }, ms);
+    timersRef.current.add(id);
+    return id;
+  };
+
+  useEffect(() => {
+    const timers = timersRef.current;
+    return () => {
+      timers.forEach(clearTimeout);
+      timers.clear();
+    };
+  }, []);
+
   async function refreshPermissions() {
     setCheckingPerms(true);
     try {
@@ -279,7 +297,7 @@ export default function App() {
       const text = e.payload;
       setPasteReady(text);
       invoke<HistoryEntry[]>("get_history", { limit: 100 }).then(setHistory);
-      window.setTimeout(() => {
+      trackTimeout(() => {
         setPasteReady((cur) => (cur === text ? null : cur));
       }, 8000);
     }).then((fn) => unlisteners.push(fn));
@@ -326,7 +344,7 @@ export default function App() {
     try {
       await invoke("set_config", { config });
       setStatusMsg("Saved.");
-      setTimeout(() => setStatusMsg(""), 2000);
+      trackTimeout(() => setStatusMsg(""), 2000);
     } catch (e) {
       setStatusMsg(`Error: ${e}`);
     } finally {
@@ -339,7 +357,7 @@ export default function App() {
       await invoke("set_api_key", { keyName, value });
       onSaved();
       setStatusMsg("API key saved.");
-      setTimeout(() => setStatusMsg(""), 2000);
+      trackTimeout(() => setStatusMsg(""), 2000);
     } catch (e) {
       setStatusMsg(`Error: ${e}`);
     }
@@ -368,7 +386,7 @@ export default function App() {
     } catch (e) {
       if (String(e) !== "Download aborted") {
         setStatusMsg(`Download failed: ${e}`);
-        setTimeout(() => setStatusMsg(""), 4000);
+        trackTimeout(() => setStatusMsg(""), 4000);
       }
     } finally {
       setDownloadingModel(null);
@@ -408,7 +426,7 @@ export default function App() {
       setGeminiKey("");
       setDownloadedModels([]);
       setStatusMsg("All data cleared.");
-      setTimeout(() => setStatusMsg(""), 2500);
+      trackTimeout(() => setStatusMsg(""), 2500);
     } catch (e) {
       setStatusMsg(`Reset failed: ${e}`);
     } finally {
@@ -419,7 +437,7 @@ export default function App() {
   async function copyEntry(id: string, text: string) {
     await navigator.clipboard.writeText(text);
     setCopiedId(id);
-    setTimeout(() => setCopiedId(null), 1500);
+    trackTimeout(() => setCopiedId(null), 1500);
   }
 
   async function deleteEntry(id: string) {
@@ -1305,7 +1323,7 @@ export default function App() {
                     disabled={microphone === true}
                     onClick={async () => {
                       await invoke("request_microphone");
-                      setTimeout(() => refreshPermissions(), 1000);
+                      trackTimeout(() => refreshPermissions(), 1000);
                     }}
                   >
                     Request Access
@@ -1397,7 +1415,7 @@ export default function App() {
                     disabled={inputMonitoring === true}
                     onClick={async () => {
                       await invoke("request_input_monitoring");
-                      setTimeout(() => refreshPermissions(), 1000);
+                      trackTimeout(() => refreshPermissions(), 1000);
                     }}
                   >
                     Grant Access
