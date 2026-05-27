@@ -87,10 +87,17 @@ fn record_until_stop(
 
     rt.block_on(async { stop_rx.recv().await });
 
+    // cpal 0.15's CoreAudio backend has a reference cycle: the device-disconnect
+    // listener installed inside StreamInner holds a clone of the outer Arc, so
+    // dropping our local handle never fires AudioUnit::Drop. Without this pause,
+    // the audio unit keeps callback-pumping into `captured` indefinitely — mic
+    // indicator stays lit, buffer grows ~64 KB/s at 16 kHz mono (more at native
+    // 48 kHz before resample), accumulating gigabytes over many sessions.
+    if let Err(e) = stream.pause() {
+        tracing::warn!("audio stream pause failed: {}", e);
+    }
     drop(stream);
 
-    // Don't try_unwrap — the cpal callback closure may still hold a clone of
-    // the Arc after drop(stream) returns. Just lock and drain directly.
     let samples = captured.lock().unwrap().drain(..).collect::<Vec<f32>>();
 
     if samples.is_empty() {
