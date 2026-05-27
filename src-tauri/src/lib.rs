@@ -646,7 +646,7 @@ pub fn run() {
         #[cfg(target_os = "macos")]
         {
             use tauri::{
-                menu::{Menu, MenuItem},
+                menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
                 tray::{MouseButton, TrayIconBuilder, TrayIconEvent},
                 Manager,
             };
@@ -656,6 +656,33 @@ pub fn run() {
                 let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
                 let settings_item = MenuItem::with_id(app, "settings", "Settings...", true, None::<&str>)?;
                 let menu = Menu::with_items(app, &[&settings_item, &quit])?;
+
+                // App-wide menu bar so Cmd+, opens Settings when a Whisp window
+                // has focus. LSUIElement=true keeps us out of the Dock, but we
+                // still get a menu bar when the user activates the app.
+                let app_settings = MenuItem::with_id(
+                    app, "settings", "Settings...", true, Some("Cmd+,"),
+                )?;
+                let app_quit = MenuItem::with_id(
+                    app, "quit", "Quit Whisp", true, Some("Cmd+Q"),
+                )?;
+                let separator = PredefinedMenuItem::separator(app)?;
+                let app_submenu = Submenu::with_items(
+                    app, "Whisp", true,
+                    &[&app_settings, &separator, &app_quit],
+                )?;
+                let app_menu = Menu::with_items(app, &[&app_submenu])?;
+                app.set_menu(app_menu)?;
+                app.on_menu_event(|app, event| match event.id.as_ref() {
+                    "quit" => app.exit(0),
+                    "settings" => {
+                        if let Some(w) = app.get_webview_window("settings") {
+                            let _ = w.show();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    _ => {}
+                });
 
                 let mut tray_builder = TrayIconBuilder::with_id("main");
                 if let Some(icon) = app.default_window_icon().cloned() {
