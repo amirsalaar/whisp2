@@ -465,9 +465,24 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
         request.httpBody = body
 
         NSLog("[WhispIntent] sending request to %@", cfg.baseURL)
+
+        let bgTaskId = await UIApplication.shared.beginBackgroundTask(withName: "WhispTranscribeUpload")
+        defer {
+            if bgTaskId != .invalid {
+                Task { @MainActor in UIApplication.shared.endBackgroundTask(bgTaskId) }
+            }
+        }
+
+        let sessionConfig = URLSessionConfiguration.default
+        sessionConfig.waitsForConnectivity = true
+        sessionConfig.timeoutIntervalForRequest = 60
+        sessionConfig.timeoutIntervalForResource = 120
+        let session = URLSession(configuration: sessionConfig)
+        defer { session.finishTasksAndInvalidate() }
+
         let (data, response): (Data, URLResponse)
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
             WhispLogger.error("WhispIntent", "URLSession error", error)
             throw WhispError.apiFailed("Network error: \(error.localizedDescription)")
