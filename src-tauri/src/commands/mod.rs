@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod config;
+pub mod diagnostics;
 pub mod dictionary;
 pub mod history;
 pub mod hud;

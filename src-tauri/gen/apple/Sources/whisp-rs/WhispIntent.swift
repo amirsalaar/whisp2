@@ -103,20 +103,30 @@ struct WhispRecordIntent: AppIntent {
     static var openAppWhenRun: Bool = true
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        NSLog("[WhispIntent] perform() started")
+        WhispLogger.log("WhispIntent", "perform() started")
 
         // Action Button re-press while a session is live: stop the current one
         // and exit. The previous perform()'s recorder will finish its own
         // transcription. This prevents stacked AVAudioRecorder instances.
         if let activeId = WhispRecorder.currentSessionId() {
-            NSLog("[WhispIntent] active session %@ — signalling stop and exiting", activeId)
+            WhispLogger.log("WhispIntent", "active session \(activeId) — signalling stop and exiting")
             whispPostStopNotification(sessionId: activeId)
             return .result(value: "")
         }
 
         let recorder = WhispRecorder()
-        let (text, provider) = try await recorder.recordAndTranscribe()
-        NSLog("[WhispIntent] transcription complete: %d chars", text.count)
+        let (text, provider): (String, String)
+        do {
+            (text, provider) = try await recorder.recordAndTranscribe()
+        } catch {
+            // Backstop: if anything threw past the recorder's own defer chain,
+            // make absolutely sure the static session slot is cleared so the
+            // next Action Button press doesn't get short-circuited at line 111.
+            WhispRecorder.setActiveSession(nil)
+            WhispLogger.error("WhispIntent", "recordAndTranscribe failed", error)
+            throw error
+        }
+        WhispLogger.log("WhispIntent", "transcription complete: \(text.count) chars")
 
         // Haptic + sound work in any app state — these don't gate on .active.
         await MainActor.run {
@@ -262,7 +272,7 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
             try session.setCategory(.record, mode: .default, options: .allowBluetooth)
             try session.setActive(true)
         } catch {
-            NSLog("[WhispIntent] AVAudioSession activation failed: %@", error.localizedDescription)
+            WhispLogger.error("WhispIntent", "AVAudioSession activation failed", error)
             throw error
         }
 
@@ -275,7 +285,12 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
             AVLinearPCMIsBigEndianKey: false,
         ]
 
-        recorder = try AVAudioRecorder(url: fileURL, settings: settings)
+        do {
+            recorder = try AVAudioRecorder(url: fileURL, settings: settings)
+        } catch {
+            WhispLogger.error("WhispIntent", "AVAudioRecorder init failed", error)
+            throw error
+        }
         recorder?.isMeteringEnabled = true
         recorder?.delegate = self
 
@@ -285,14 +300,78 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
                 self.continuation = continuation
                 lock.unlock()
                 // Unbounded recording — only explicit stop signals end this.
-                recorder?.record()
+                let started = recorder?.record() ?? false
+                if !started {
+                    WhispLogger.error("WhispIntent", "recorder.record() returned false (silent start failure)")
+                    self.resumeOnce(throwing: WhispError.recordingFailed)
+                    return
+                }
                 Task { [activity] in
+                    // Verify the recorder actually entered the recording state
+                    // before we trust it. AVFoundation occasionally returns
+                    // true from record() but never transitions to isRecording,
+                    // which leaves the continuation pinned forever and traps
+                    // activeSessionId in the static slot — the user has to
+                    // close+reopen the app to escape.
+                    if !(await self.confirmRecordingStarted()) {
+                        WhispLogger.error("WhispIntent", "recorder failed to start within 500ms — aborting session")
+                        self.recorder?.stop()
+                        self.resumeOnce(throwing: WhispError.recordingFailed)
+                        return
+                    }
                     await self.meterAndWaitForStop(activity: activity, sessionId: sessionId)
+                    // Watchdog: if AVAudioRecorder.stop() was called but the
+                    // delegate callback never fires, the continuation would
+                    // hang forever. After 3s, force-resume with whatever's on
+                    // disk (or fail) so the session can wind down.
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3 * 1_000_000_000)
+                        if self.continuationStillPending() {
+                            WhispLogger.error("WhispIntent", "delegate never fired post-stop — force-resuming")
+                            if let url = self.recorder?.url,
+                               FileManager.default.fileExists(atPath: url.path) {
+                                self.resumeOnce(returning: url)
+                            } else {
+                                self.resumeOnce(throwing: WhispError.recordingFailed)
+                            }
+                        }
+                    }
                 }
             }
         } onCancel: {
             self.recorder?.stop()
         }
+    }
+
+    // Poll until recorder.isRecording is true or 500ms elapses. Returns true
+    // if the recorder reached the recording state.
+    private func confirmRecordingStarted() async -> Bool {
+        for _ in 0..<10 {
+            if recorder?.isRecording == true { return true }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        return recorder?.isRecording == true
+    }
+
+    private func resumeOnce(returning url: URL) {
+        lock.lock()
+        let c = continuation
+        continuation = nil
+        lock.unlock()
+        c?.resume(returning: url)
+    }
+
+    private func resumeOnce(throwing error: Error) {
+        lock.lock()
+        let c = continuation
+        continuation = nil
+        lock.unlock()
+        c?.resume(throwing: error)
+    }
+
+    private func continuationStillPending() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return continuation != nil
     }
 
     // -40 dBFS averagePower threshold; 1.5s trailing silence after speech is
@@ -342,21 +421,23 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
 
     // AVAudioRecorderDelegate — called on an arbitrary thread by AVFoundation
     func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
-        lock.lock()
-        let c = continuation
-        continuation = nil
-        lock.unlock()
         if flag {
-            c?.resume(returning: recorder.url)
+            resumeOnce(returning: recorder.url)
         } else {
-            c?.resume(throwing: WhispError.recordingFailed)
+            WhispLogger.error("WhispIntent", "audioRecorderDidFinishRecording successfully=false")
+            resumeOnce(throwing: WhispError.recordingFailed)
         }
+    }
+
+    func audioRecorderEncodeErrorDidOccur(_ recorder: AVAudioRecorder, error: Error?) {
+        WhispLogger.error("WhispIntent", "audioRecorderEncodeErrorDidOccur", error)
+        resumeOnce(throwing: error ?? WhispError.recordingFailed)
     }
 
     private func transcribe(audioURL: URL) async throws -> (text: String, provider: String) {
         let cfg = try readProviderConfig()
-        NSLog("[WhispIntent] transcribe: provider=%@ baseURL=%@ model=%@",
-              cfg.provider, cfg.baseURL, cfg.model)
+        WhispLogger.log("WhispIntent",
+            "transcribe: provider=\(cfg.provider) baseURL=\(cfg.baseURL) model=\(cfg.model)")
 
         if cfg.provider == "local_whisper", let modelPath = cfg.localModelPath {
             return try runLocalWhisper(wavURL: audioURL, modelPath: modelPath, language: cfg.language)
@@ -388,7 +469,7 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            NSLog("[WhispIntent] URLSession error: %@", error.localizedDescription)
+            WhispLogger.error("WhispIntent", "URLSession error", error)
             throw WhispError.apiFailed("Network error: \(error.localizedDescription)")
         }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -396,6 +477,7 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
 
         guard statusCode == 200 else {
             let body = String(data: data, encoding: .utf8) ?? "(non-utf8)"
+            WhispLogger.error("WhispIntent", "HTTP \(statusCode): \(body)")
             throw WhispError.apiFailed("HTTP \(statusCode): \(body)")
         }
 
@@ -438,7 +520,7 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
         } else {
             msg = "unknown local Whisper error"
         }
-        NSLog("[WhispIntent] local_whisper failed: %@", msg)
+        WhispLogger.error("WhispIntent", "local_whisper failed: \(msg)")
         throw WhispError.apiFailed("Local Whisper: \(msg)")
     }
 
@@ -488,7 +570,7 @@ private final class WhispRecorder: NSObject, AVAudioRecorderDelegate {
             // paths from older builds pass through unchanged.
             let resolved = Self.resolveModelPath(stored)
             guard FileManager.default.fileExists(atPath: resolved) else {
-                NSLog("[WhispIntent] local model not found at resolved path: %@ (stored=%@)", resolved, stored)
+                WhispLogger.error("WhispIntent", "local model not found at resolved path: \(resolved) (stored=\(stored))")
                 throw WhispError.localWhisperModelMissing
             }
             return ProviderConfig(apiKey: "", baseURL: "", model: "",

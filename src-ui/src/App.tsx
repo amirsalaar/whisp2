@@ -205,6 +205,8 @@ export default function App() {
   const [mobileRecording, setMobileRecording] = useState<"idle" | "recording" | "processing">("idle");
   const [pasteReady, setPasteReady] = useState<string | null>(null);
   const [installShortcutMsg, setInstallShortcutMsg] = useState<string | null>(null);
+  const [iosLog, setIosLog] = useState<string | null>(null);
+  const [iosLogStatus, setIosLogStatus] = useState<string>("");
 
   const isIos = platform === "ios";
 
@@ -431,6 +433,37 @@ export default function App() {
       setStatusMsg(`Reset failed: ${e}`);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function loadIosLog() {
+    try {
+      const text = await invoke<string>("read_ios_log");
+      setIosLog(text || "(log is empty — no events recorded yet)");
+    } catch (e) {
+      setIosLog(`Failed to read log: ${e}`);
+    }
+  }
+
+  async function copyIosLog() {
+    if (!iosLog) return;
+    try {
+      await navigator.clipboard.writeText(iosLog);
+      setIosLogStatus("Copied.");
+      trackTimeout(() => setIosLogStatus(""), 1500);
+    } catch (e) {
+      setIosLogStatus(`Copy failed: ${e}`);
+    }
+  }
+
+  async function clearIosLog() {
+    try {
+      await invoke("clear_ios_log");
+      setIosLog("");
+      setIosLogStatus("Log cleared.");
+      trackTimeout(() => setIosLogStatus(""), 1500);
+    } catch (e) {
+      setIosLogStatus(`Clear failed: ${e}`);
     }
   }
 
@@ -1147,6 +1180,57 @@ export default function App() {
               </button>
               {statusMsg && <span className="status">{statusMsg}</span>}
             </div>
+
+            {isIos && (
+              <div className="settings-section">
+                <div className="section-header">
+                  <h2 className="section-title">Diagnostics</h2>
+                </div>
+                <div className="settings-row">
+                  <div className="row-label">
+                    <div className="label-text">On-device log</div>
+                    <div className="label-hint">
+                      If recording silently fails ("unknown error" or no
+                      transcription), open the log and paste it into a GitHub
+                      issue. The log is stored locally — nothing is uploaded.
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn-secondary" onClick={loadIosLog}>
+                      View Logs
+                    </button>
+                    <button className="btn-secondary" onClick={clearIosLog}>
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                {iosLog !== null && (
+                  <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                    <textarea
+                      readOnly
+                      value={iosLog}
+                      style={{
+                        width: "100%",
+                        minHeight: 200,
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                        fontSize: 11,
+                        padding: 8,
+                        whiteSpace: "pre",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                      <button className="btn-secondary" onClick={copyIosLog}>
+                        Copy
+                      </button>
+                      <button className="btn-secondary" onClick={() => setIosLog(null)}>
+                        Hide
+                      </button>
+                      {iosLogStatus && <span className="status">{iosLogStatus}</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="settings-section danger-zone">
               <div className="section-header">

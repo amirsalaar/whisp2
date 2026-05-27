@@ -78,6 +78,7 @@ ios-typecheck:
 	  -sdk "$$(xcrun --sdk iphonesimulator --show-sdk-path)" \
 	  Shared/WhispActivityAttributes.swift \
 	  Shared/WhispStopIntent.swift \
+	  Shared/WhispLogger.swift \
 	  Sources/whisp-rs/WhispIntent.swift
 
 # Clean-regen Xcode project from project.yml (in-place merges have stale-state bugs)

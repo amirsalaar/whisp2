@@ -639,6 +639,8 @@ pub fn run() {
                 commands::config::get_platform,
                 commands::config::reset_app_data,
                 commands::shortcut::install_shortcut,
+                commands::diagnostics::read_ios_log,
+                commands::diagnostics::clear_ios_log,
             ]);
 
         #[cfg(target_os = "macos")]
