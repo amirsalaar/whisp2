@@ -58,6 +58,10 @@ pub fn spawn_tasks(
     let mut cmd_rx = cmd_rx;
     let (text_tx, mut text_rx) = mpsc::channel::<(String, Option<String>)>(8);
     let (reset_tx, mut reset_rx) = mpsc::channel::<()>(8);
+    // Carries a user-facing error message from the audio task into the FSM so
+    // the menu bar icon turns red with the failure as its tooltip, instead of
+    // silently resetting to Idle.
+    let (error_tx, mut error_rx) = mpsc::channel::<String>(8);
 
     // Bridge std::sync::mpsc (CGEventTap) into tokio channel.
     let (async_hk_tx, mut async_hk_rx) = mpsc::channel::<HotkeyEvent>(64);
@@ -73,6 +77,7 @@ pub fn spawn_tasks(
     let cmd_tx_hk = state.recording_cmd_tx.clone();
     let state_hk = Arc::clone(&state);
     let ah_hk = app_handle.clone();
+    let reset_tx_fsm = reset_tx.clone();
     rt.spawn(async move {
         let mut current = RecordingState::Idle;
         let mut tray_anim_abort: Option<tokio::task::AbortHandle> = None;
@@ -115,11 +120,27 @@ pub fn spawn_tasks(
                     if maybe_reset.is_none() { break; }
                     RecordingState::Idle
                 }
+                maybe_error = error_rx.recv() => {
+                    match maybe_error {
+                        Some(msg) => RecordingState::Error(msg),
+                        None => break,
+                    }
+                }
             };
 
             if new_state != current {
                 current = new_state.clone();
                 update_tray_icon(&ah_hk, &current, &mut tray_anim_abort);
+
+                // The Error state is transient: hold the red icon long enough to
+                // be noticed, then fall back to Idle on its own.
+                if matches!(current, RecordingState::Error(_)) {
+                    let reset = reset_tx_fsm.clone();
+                    tokio::spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_secs(4)).await;
+                        let _ = reset.send(()).await;
+                    });
+                }
             }
         }
     });
@@ -127,6 +148,7 @@ pub fn spawn_tasks(
     // --- audio_task ---
     let text_tx_audio = text_tx.clone();
     let reset_tx_audio = reset_tx.clone();
+    let error_tx_audio = error_tx.clone();
     let state_arc = Arc::clone(&state);
     rt.spawn(async move {
         let mut stop_tx: Option<mpsc::Sender<()>> = None;
@@ -148,7 +170,7 @@ pub fn spawn_tasks(
                         }
                         Err(e) => {
                             tracing::error!("failed to start recording: {}", e);
-                            let _ = reset_tx_audio.send(()).await;
+                            let _ = error_tx_audio.send(format!("Couldn't start recording: {e}")).await;
                         }
                     }
                 }
@@ -160,6 +182,7 @@ pub fn spawn_tasks(
                         let db = state_arc.db.clone();
                         let text_tx = text_tx_audio.clone();
                         let reset_tx = reset_tx_audio.clone();
+                        let error_tx = error_tx_audio.clone();
                         let app_id = source_app.take();
                         let whisper_ctx = Arc::clone(&state_arc.whisper_ctx);
 
@@ -190,13 +213,13 @@ pub fn spawn_tasks(
                                                 }
                                                 Err(e) => {
                                                     tracing::error!("transcription failed: {}", e);
-                                                    let _ = reset_tx.send(()).await;
+                                                    let _ = error_tx.send(e.to_string()).await;
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             tracing::error!("WAV encode failed: {}", e);
-                                            let _ = reset_tx.send(()).await;
+                                            let _ = error_tx.send(format!("Audio encoding failed: {e}")).await;
                                         }
                                     }
                                 }
@@ -440,9 +463,9 @@ fn update_tray_icon(
             // Amber pill + white spinner arc
             set_tray(app, "Whisp — Processing", render_spinner_icon(22, 232, 169, 40), 22);
         }
-        RecordingState::Error(_) => {
-            // Red pill + white static waveform
-            set_tray(app, "Whisp — Error", render_waveform_pill(22, 192, 57, 43), 22);
+        RecordingState::Error(msg) => {
+            // Red pill + white static waveform; the failure shows as the tooltip.
+            set_tray(app, &format!("Whisp — {msg}"), render_waveform_pill(22, 192, 57, 43), 22);
         }
     }
 }
