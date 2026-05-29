@@ -8,6 +8,10 @@ use tokio::sync::mpsc;
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
 /// Returns the names of all available cpal input devices.
+// cpal 0.17 deprecates `name()` in favor of `description()`/`id()`, but the
+// stored config matches the user's selected device by this exact name string,
+// so switching the key would invalidate existing device selections.
+#[allow(deprecated)]
 pub fn list_input_devices() -> Vec<String> {
     let host = cpal::default_host();
     host.input_devices()
@@ -32,6 +36,7 @@ pub fn start_recording(device_name: Option<String>) -> Result<(mpsc::Sender<()>,
     Ok((stop_tx, pcm_rx))
 }
 
+#[allow(deprecated)] // device matched by `name()`; see list_input_devices
 fn record_until_stop(
     stop_rx: &mut mpsc::Receiver<()>,
     result_tx: mpsc::Sender<Vec<f32>>,
@@ -66,7 +71,7 @@ fn record_until_stop(
         .default_input_config()
         .context("no default input config")?;
 
-    let input_sample_rate = supported_config.sample_rate().0;
+    let input_sample_rate = supported_config.sample_rate();
     let channels = supported_config.channels() as usize;
     let sample_format = supported_config.sample_format();
     let stream_config = supported_config.config();
@@ -87,12 +92,10 @@ fn record_until_stop(
 
     rt.block_on(async { stop_rx.recv().await });
 
-    // cpal 0.15's CoreAudio backend has a reference cycle: the device-disconnect
-    // listener installed inside StreamInner holds a clone of the outer Arc, so
-    // dropping our local handle never fires AudioUnit::Drop. Without this pause,
-    // the audio unit keeps callback-pumping into `captured` indefinitely — mic
-    // indicator stays lit, buffer grows ~64 KB/s at 16 kHz mono (more at native
-    // 48 kHz before resample), accumulating gigabytes over many sessions.
+    // Stop the audio unit before drop so the mic indicator clears immediately.
+    // (cpal 0.17 breaks the old StreamInner→Stream Arc cycle with a Weak ref +
+    // explicit Drop, so drop alone already releases the unit — this just makes
+    // the release deterministic rather than waiting on the final Arc going away.)
     if let Err(e) = stream.pause() {
         tracing::warn!("audio stream pause failed: {}", e);
     }

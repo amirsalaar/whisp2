@@ -14,7 +14,7 @@ pub fn play() {
         Err(_) => return,
     };
 
-    let sample_rate = config.sample_rate().0 as f32;
+    let sample_rate = config.sample_rate() as f32;
     let channels = config.channels() as usize;
 
     // Two tones: 880 Hz for 80ms, then 1047 Hz for 120ms

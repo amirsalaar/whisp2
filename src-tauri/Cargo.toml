@@ -44,7 +44,7 @@ security-framework = "3"
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio", "macros"] }
 
 # Audio capture
-cpal = "0.15"
+cpal = "0.17"
 rubato = "0.15"
 
 # Logging
