@@ -572,11 +572,45 @@ async fn spawn_mobile_audio_task(
 /// App entry point called by both `main.rs` (desktop) and the iOS/Android mobile_entry_point.
 /// All Tauri builder setup lives here so the iOS linker can find the required runtime symbols.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Initialize tracing once at startup. Without this, every `tracing::*` call in
+/// the app is silently dropped — which left us blind while debugging. Writes to
+/// stdout and to a daily-rotated file under the app support dir so failures on a
+/// user's machine can be inspected after the fact.
+fn init_logging() {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info,whisp_rs_lib=debug"));
+
+    let registry = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt::layer().with_writer(std::io::stdout));
+
+    if let Ok(dir) = config::persistence::app_support_dir() {
+        let log_dir = dir.join("logs");
+        if std::fs::create_dir_all(&log_dir).is_ok() {
+            let appender = tracing_appender::rolling::daily(&log_dir, "whisp.log");
+            // Non-blocking writer needs its guard kept alive for the process
+            // lifetime; leak it intentionally.
+            let (writer, guard) = tracing_appender::non_blocking(appender);
+            std::mem::forget(guard);
+            let _ = registry
+                .with(fmt::layer().with_ansi(false).with_writer(writer))
+                .try_init();
+            return;
+        }
+    }
+
+    let _ = registry.try_init();
+}
+
 pub fn run() {
     use std::sync::atomic::AtomicBool;
     use sqlx::sqlite::SqliteConnectOptions;
     use sqlx::SqlitePool;
     use tokio::sync::Mutex as TokioMutex;
+
+    init_logging();
 
     let rt = tokio::runtime::Runtime::new().expect("failed to create Tokio runtime");
     rt.block_on(async {
