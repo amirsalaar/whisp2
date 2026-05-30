@@ -69,7 +69,29 @@ API keys are stored in the macOS Keychain, never on disk.
 
 ## Building from Source
 
-**Prerequisites:** Rust (stable), Node 22+, Xcode Command Line Tools.
+### Prerequisites
+
+**macOS development:**
+
+| Tool | Version | Install |
+|---|---|---|
+| Rust toolchain (`cargo`, `rustc`) | stable | [`rustup`](https://rustup.rs) — `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
+| Tauri CLI | 2.x | `cargo install tauri-cli --version "^2"` (provides the `cargo tauri` subcommand) |
+| Node.js + npm | 22+ | [nodejs.org](https://nodejs.org) or `brew install node` |
+| Xcode Command Line Tools | latest | `xcode-select --install` |
+
+The Makefile invokes cargo at `~/.cargo/bin/cargo` — the default `rustup` install location.
+
+**iOS development (additional, optional):**
+
+| Tool | Install |
+|---|---|
+| Xcode (full IDE, not just CLT) | Mac App Store |
+| iOS Rust targets | `rustup target add aarch64-apple-ios aarch64-apple-ios-sim` |
+| XcodeGen | `brew install xcodegen` (needed by `make ios-regen`) |
+| Apple Developer account | required to sign and run on a physical device |
+
+### Build
 
 ```sh
 # Install frontend deps (first time only)
