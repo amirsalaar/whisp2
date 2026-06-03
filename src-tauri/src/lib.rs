@@ -35,6 +35,12 @@ pub mod app_context;
 pub mod injection;
 pub mod permissions;
 
+/// Below this RMS energy, a recording is treated as silence and skipped to
+/// avoid Whisper hallucinating filler like "Thank you." on quiet audio.
+/// Speech RMS is typically 0.05–0.2; room noise/true silence is ~0.001–0.005.
+#[cfg(target_os = "macos")]
+const SILENCE_RMS_THRESHOLD: f32 = 0.01;
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
@@ -190,6 +196,12 @@ pub fn spawn_tasks(
                             let samples = rx.recv().await;
                             match samples {
                                 Some(s) if !s.is_empty() => {
+                                    let rms = (s.iter().map(|v| v * v).sum::<f32>() / s.len() as f32).sqrt();
+                                    if rms < SILENCE_RMS_THRESHOLD {
+                                        tracing::info!("skipping transcription: audio below silence threshold (rms={rms:.5})");
+                                        let _ = reset_tx.send(()).await;
+                                        return;
+                                    }
                                     match capture::encode_wav(&s) {
                                         Ok(wav) => {
                                             match manager::transcribe(&config, wav, whisper_ctx).await {
