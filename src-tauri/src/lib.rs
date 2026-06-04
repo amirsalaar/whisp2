@@ -37,9 +37,10 @@ pub mod permissions;
 
 /// Below this RMS energy, a recording is treated as silence and skipped to
 /// avoid Whisper hallucinating filler like "Thank you." on quiet audio.
-/// Speech RMS is typically 0.05–0.2; room noise/true silence is ~0.001–0.005.
+/// True silence/room noise is ~0.001–0.002; soft speech is typically >0.01.
+/// 0.003 clears noise while keeping quiet-mic recordings.
 #[cfg(target_os = "macos")]
-const SILENCE_RMS_THRESHOLD: f32 = 0.01;
+const SILENCE_RMS_THRESHOLD: f32 = 0.003;
 
 #[derive(Clone)]
 pub struct AppState {
