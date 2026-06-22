@@ -42,6 +42,36 @@ pub mod permissions;
 #[cfg(target_os = "macos")]
 const SILENCE_RMS_THRESHOLD: f32 = 0.003;
 
+/// Below this, the device delivered essentially digital silence — a dead/wrong
+/// mic, a muted input, a silent virtual driver, or denied Microphone permission.
+/// This is reported loudly (red tray), unlike the merely-quiet band between this
+/// and SILENCE_RMS_THRESHOLD which is skipped silently to avoid hallucinations.
+#[cfg(target_os = "macos")]
+const DEAD_MIC_RMS_THRESHOLD: f32 = 0.0005;
+
+/// How a captured clip's loudness should be handled.
+#[cfg(target_os = "macos")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AudioLevel {
+    /// ~Digital silence: the device produced no real signal. Report loudly.
+    DeadMic,
+    /// Quiet enough to be room noise, not speech. Skip silently (anti-hallucination).
+    Silent,
+    /// Real signal present — transcribe.
+    Speech,
+}
+
+#[cfg(target_os = "macos")]
+fn classify_rms(rms: f32) -> AudioLevel {
+    if rms < DEAD_MIC_RMS_THRESHOLD {
+        AudioLevel::DeadMic
+    } else if rms < SILENCE_RMS_THRESHOLD {
+        AudioLevel::Silent
+    } else {
+        AudioLevel::Speech
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<RwLock<AppConfig>>,
@@ -162,16 +192,31 @@ pub fn spawn_tasks(
         let mut pcm_rx: Option<mpsc::Receiver<Vec<f32>>> = None;
         let mut saved_vol: Option<f32> = None;
         let mut source_app: Option<String> = None;
+        let mut active_device: Option<String> = None;
 
         loop {
             match cmd_rx.recv().await {
                 Some(RecordingCommand::Start(bundle_id)) => {
                     source_app = bundle_id;
                     let input_device = state_arc.config.read().unwrap().input_device.clone();
-                    match capture::start_recording(input_device) {
-                        Ok((tx, rx)) => {
-                            stop_tx = Some(tx);
-                            pcm_rx = Some(rx);
+                    match capture::start_recording(input_device.clone()) {
+                        Ok(session) => {
+                            // Warn loudly when the user's chosen mic was absent and we
+                            // recorded from the system default instead — otherwise a
+                            // silent substitute device looks like the app "not working".
+                            if session.fell_back {
+                                if let Some(requested) = input_device.as_deref() {
+                                    let _ = error_tx_audio
+                                        .send(format!(
+                                            "Mic '{requested}' unavailable — using '{}'",
+                                            session.device_name
+                                        ))
+                                        .await;
+                                }
+                            }
+                            active_device = Some(session.device_name);
+                            stop_tx = Some(session.stop_tx);
+                            pcm_rx = Some(session.pcm_rx);
                             saved_vol = audio::volume::boost();
                             tracing::info!("recording started");
                         }
@@ -191,6 +236,7 @@ pub fn spawn_tasks(
                         let reset_tx = reset_tx_audio.clone();
                         let error_tx = error_tx_audio.clone();
                         let app_id = source_app.take();
+                        let device_label = active_device.take().unwrap_or_else(|| "the microphone".into());
                         let whisper_ctx = Arc::clone(&state_arc.whisper_ctx);
 
                         tokio::spawn(async move {
@@ -198,7 +244,18 @@ pub fn spawn_tasks(
                             match samples {
                                 Some(s) if !s.is_empty() => {
                                     let rms = (s.iter().map(|v| v * v).sum::<f32>() / s.len() as f32).sqrt();
-                                    if rms < SILENCE_RMS_THRESHOLD {
+                                    // A dead/silent device (wrong default, muted, or a
+                                    // virtual driver) yields ~zero RMS. Surface that loudly
+                                    // instead of dropping it like a merely-quiet clip — the
+                                    // latter is skipped silently to avoid hallucinations.
+                                    if classify_rms(rms) == AudioLevel::DeadMic {
+                                        tracing::warn!("no audio from '{device_label}' (rms={rms:.5}) — mic may be muted, wrong, or permission denied");
+                                        let _ = error_tx
+                                            .send(format!("No audio from '{device_label}' — check mic & Microphone permission"))
+                                            .await;
+                                        return;
+                                    }
+                                    if classify_rms(rms) == AudioLevel::Silent {
                                         tracing::info!("skipping transcription: audio below silence threshold (rms={rms:.5})");
                                         let _ = reset_tx.send(()).await;
                                         return;
@@ -501,9 +558,12 @@ async fn spawn_mobile_audio_task(
             Some(RecordingCommand::Start(_)) => {
                 let input_device = state.config.read().unwrap().input_device.clone();
                 match capture::start_recording(input_device) {
-                    Ok((tx, rx)) => {
-                        stop_tx = Some(tx);
-                        pcm_rx = Some(rx);
+                    Ok(session) => {
+                        if session.fell_back {
+                            tracing::warn!("mobile: requested mic unavailable, using '{}'", session.device_name);
+                        }
+                        stop_tx = Some(session.stop_tx);
+                        pcm_rx = Some(session.pcm_rx);
                         let _ = app_handle.emit("recording_state_changed", "recording");
                         tracing::info!("mobile recording started");
                     }
@@ -939,5 +999,26 @@ mod tests {
         let a = render_waveform_idle(22, 100, 100, 100, 200);
         let b = render_waveform_idle(22, 100, 100, 100, 200);
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn test_classify_rms_bands() {
+        // Digital silence from a dead/wrong/muted device → reported loudly.
+        assert_eq!(classify_rms(0.0), AudioLevel::DeadMic);
+        assert_eq!(classify_rms(0.0001), AudioLevel::DeadMic);
+        // Room noise / very quiet → skipped silently to avoid hallucinations.
+        assert_eq!(classify_rms(0.001), AudioLevel::Silent);
+        assert_eq!(classify_rms(0.0029), AudioLevel::Silent);
+        // Real speech → transcribed.
+        assert_eq!(classify_rms(0.01), AudioLevel::Speech);
+        assert_eq!(classify_rms(0.2), AudioLevel::Speech);
+    }
+
+    #[test]
+    fn test_classify_rms_boundaries() {
+        // Boundaries are exclusive lower bounds: a value exactly at a threshold
+        // belongs to the higher band.
+        assert_eq!(classify_rms(DEAD_MIC_RMS_THRESHOLD), AudioLevel::Silent);
+        assert_eq!(classify_rms(SILENCE_RMS_THRESHOLD), AudioLevel::Speech);
     }
 }

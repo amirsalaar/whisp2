@@ -19,54 +19,82 @@ pub fn list_input_devices() -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Records audio from the selected input device until the returned sender is
-/// dropped, then resamples to 16 kHz mono f32 and sends the result.
-pub fn start_recording(device_name: Option<String>) -> Result<(mpsc::Sender<()>, mpsc::Receiver<Vec<f32>>)> {
+/// A live recording session. Carries the channels to stop capture and receive
+/// the resampled PCM, plus what device actually ended up being used so the caller
+/// can warn the user when their chosen mic wasn't the one we recorded from.
+pub struct RecordingSession {
+    /// Drop (or send on) this to stop capture and trigger the PCM send.
+    pub stop_tx: mpsc::Sender<()>,
+    /// Receives the final 16 kHz mono f32 samples once recording stops.
+    pub pcm_rx: mpsc::Receiver<Vec<f32>>,
+    /// Name of the device we actually opened (may differ from the requested one).
+    pub device_name: String,
+    /// True when the caller asked for a specific device by name but it wasn't
+    /// present, so we fell back to the macOS system-default input instead.
+    pub fell_back: bool,
+}
+
+/// Records audio from the selected input device until `stop_tx` is dropped, then
+/// resamples to 16 kHz mono f32 and sends the result. The device is resolved
+/// synchronously here (not on the capture thread) so the returned session can
+/// report the actual device name and whether a fallback occurred.
+#[allow(deprecated)] // device matched by `name()`; see list_input_devices
+pub fn start_recording(device_name: Option<String>) -> Result<RecordingSession> {
+    let host = cpal::default_host();
+
+    let (device, fell_back) = match &device_name {
+        Some(name) => {
+            let found = host
+                .input_devices()?
+                .find(|d| d.name().ok().as_deref() == Some(name.as_str()));
+            match found {
+                Some(d) => (d, false),
+                None => {
+                    tracing::warn!(
+                        "input device '{}' not found — falling back to system default",
+                        name
+                    );
+                    (
+                        host.default_input_device().context("no default input device")?,
+                        true,
+                    )
+                }
+            }
+        }
+        None => (
+            host.default_input_device().context("no default input device")?,
+            false,
+        ),
+    };
+
+    let actual_name = device.name().unwrap_or_else(|_| "<unknown>".into());
+    tracing::info!("recording on device: {}", actual_name);
+
     let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
     let (pcm_tx, pcm_rx) = mpsc::channel::<Vec<f32>>(1);
 
     let rt = tokio::runtime::Handle::current();
 
     std::thread::spawn(move || {
-        if let Err(e) = record_until_stop(&mut stop_rx, pcm_tx, rt, device_name) {
+        if let Err(e) = record_until_stop(&mut stop_rx, pcm_tx, rt, device) {
             tracing::error!("audio capture error: {}", e);
         }
     });
 
-    Ok((stop_tx, pcm_rx))
+    Ok(RecordingSession {
+        stop_tx,
+        pcm_rx,
+        device_name: actual_name,
+        fell_back,
+    })
 }
 
-#[allow(deprecated)] // device matched by `name()`; see list_input_devices
 fn record_until_stop(
     stop_rx: &mut mpsc::Receiver<()>,
     result_tx: mpsc::Sender<Vec<f32>>,
     rt: tokio::runtime::Handle,
-    device_name: Option<String>,
+    device: cpal::Device,
 ) -> Result<()> {
-    let host = cpal::default_host();
-
-    let device = match &device_name {
-        Some(name) => {
-            let found = host
-                .input_devices()?
-                .find(|d| d.name().ok().as_deref() == Some(name.as_str()));
-            match found {
-                Some(d) => d,
-                None => {
-                    tracing::warn!(
-                        "input device '{}' not found — falling back to system default",
-                        name
-                    );
-                    host.default_input_device().context("no default input device")?
-                }
-            }
-        }
-        None => host.default_input_device().context("no default input device")?,
-    };
-
-    let device_name_str = device.name().unwrap_or_else(|_| "<unknown>".into());
-    tracing::info!("recording on device: {}", device_name_str);
-
     let supported_config = device
         .default_input_config()
         .context("no default input config")?;

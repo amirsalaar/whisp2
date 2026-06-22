@@ -1,5 +1,29 @@
 # whisp-rs todos
 
+## Active: fix system-default mic silently capturing silence (2026-06-22)
+
+### Root cause
+- macOS system-default input often isn't the user's real mic (laptop mic / a
+  virtual "Microsoft Teams Audio"-style driver that returns silence).
+- cpal binds a concrete device id identically for None vs explicit selection
+  (cpal device.rs:235), so "System Default" just follows the wrong/silent OS default.
+- When the selected device is absent, `capture::record_until_stop` silently falls
+  back to the OS default (capture.rs:56) and lib.rs silently drops the silent clip
+  as "below silence threshold" — user gets no feedback and must re-select each time.
+
+### Plan
+- [ ] capture.rs: resolve device synchronously in `start_recording`; return a
+      `RecordingSession` carrying stop_tx, pcm_rx, the actual device name, and a
+      `fell_back` flag so the caller knows if a substitute device was used.
+- [ ] lib.rs macOS audio_task: on fallback, surface a LOUD warning (red tray +
+      tooltip naming the substitute) instead of switching silently.
+- [ ] lib.rs: separate a dead/silent mic (rms≈0) from a genuinely quiet clip.
+      Dead mic → loud Error naming the device + "check Microphone permission";
+      keep quiet-clip silence-skip for anti-hallucination (commits 9e46cb7/b5ad291).
+- [ ] Mirror RecordingSession use in mobile task (log only; no tray).
+- [ ] Tests + `make check`, `make lint-rs`, `make test`.
+- [ ] /gstack-qa, PR, squash-merge, trigger CI release.
+
 ## Done
 
 - [x] Tauri v2 project scaffold — LSUIElement, no sandbox, entitlements.plist
