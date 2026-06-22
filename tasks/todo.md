@@ -20,9 +20,10 @@
 - [ ] lib.rs: separate a dead/silent mic (rms≈0) from a genuinely quiet clip.
       Dead mic → loud Error naming the device + "check Microphone permission";
       keep quiet-clip silence-skip for anti-hallucination (commits 9e46cb7/b5ad291).
-- [ ] Mirror RecordingSession use in mobile task (log only; no tray).
-- [ ] Tests + `make check`, `make lint-rs`, `make test`.
-- [ ] /gstack-qa, PR, squash-merge, trigger CI release.
+- [x] Mirror RecordingSession use in mobile task (log only; no tray).
+- [x] Tests + `make check`, `make lint-rs`, `make test` (40/40), `make build` (.app+.dmg).
+- [x] QA (Rust-adapted; no web URL), squash-merged to main locally, pushed via
+      personal SSH key with [release] trailer → Release workflow run 27978990934 in_progress.
 
 ## Done
 
