@@ -34,6 +34,7 @@ Whisp is the same workflow, free, open-source, with your choice of cloud provide
 - **Floating HUD** shows recording state without interrupting focus
 - **Dictionary** — define word substitutions applied after every transcription
 - **History** — searchable log of past transcriptions with per-entry copy/delete
+- **Shareable logs** — Settings → Diagnostics lets you view, copy, or open the app logs for a bug report; logs are kept locally for 30 days, nothing is uploaded
 - **No clipboard** — text is injected directly, never touches your clipboard
 
 ## Requirements
@@ -123,6 +124,7 @@ Configurable from Settings. Supported keys: Right ⌘, Left ⌥, Right ⌥, Left
 - Config: `~/Library/Application Support/com.whisp2.app/config.json`
 - History: `~/Library/Application Support/com.whisp2.app/history.db` (SQLite)
 - Whisper models: `~/Library/Application Support/com.whisp2.app/models/`
+- Logs: `~/Library/Application Support/com.whisp2.app/logs/` (daily files, auto-pruned after 30 days)
 - API keys: macOS Keychain (`com.whisp2.app`)
 
 Audio is never stored to disk. When using cloud providers, audio is sent directly to the provider's API and discarded.

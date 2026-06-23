@@ -49,8 +49,8 @@ make ui-build     # tsc + vite build
 - **`src-tauri/src/lib.rs::run()`** is the unified Tauri builder for both desktop and mobile (`#[cfg_attr(mobile, tauri::mobile_entry_point)]`). It builds the SQLite pool, constructs `AppState`, registers all Tauri commands, and on macOS installs the CGEventTap, builds the tray icon, and calls `spawn_tasks`. On iOS it spawns `spawn_mobile_audio_task` instead.
 - **`src-tauri/src/main.rs`** is the desktop binary entry; it just calls `whisp_rs::run()`.
 - **macOS `spawn_tasks`** runs three concurrent async tasks for the lifetime of the app:
-  1. **hotkey_task** — reads `HotkeyEvent`s from the CGEventTap bridge, drives the `RecordingState` FSM (`Idle → Recording → Processing → Idle`), updates the tray icon.
-  2. **audio_task** — receives `RecordingCommand` from hotkey_task; starts/stops `cpal` capture; when stopped, encodes PCM → WAV, calls `transcription::manager::transcribe`, applies dictionary corrections, saves to history, then sends the text to injection_task.
+  1. **hotkey_task** — reads `HotkeyEvent`s from the CGEventTap bridge, drives the `RecordingState` FSM (`Idle → Recording → Processing → Idle`, plus a transient `Error(String)` state that paints the tray red with the message as tooltip, then auto-resets to `Idle`), updates the tray icon.
+  2. **audio_task** — receives `RecordingCommand` from hotkey_task; starts/stops `cpal` capture; when stopped, classifies the clip by RMS via `classify_rms` (`DeadMic` below `DEAD_MIC_RMS_THRESHOLD` → loud `Error` naming the device; `Silent` below `SILENCE_RMS_THRESHOLD` → skipped quietly to avoid hallucinations; `Speech` → transcribe), encodes PCM → WAV, calls `transcription::manager::transcribe`, applies dictionary corrections, saves to history, then sends the text to injection_task. Also warns loudly if the configured mic was unavailable and `capture::start_recording` fell back to the system default (`RecordingSession.fell_back`).
   3. **injection_task** — receives `(text, source_app)` pairs, calls `injection::text::type_text` on the main thread via `run_on_main_thread`.
 - **iOS `spawn_mobile_audio_task`** — single async task driven by `commands::audio` from `WhispIntent`; emits `recording_state_changed` and `transcription_result` to the WebView. No hotkey, no injection.
 
@@ -61,7 +61,7 @@ make ui-build     # tsc + vite build
 | `app_context/mod.rs` | Shared platform-agnostic context handle (paths, logging) |
 | `ffi.rs` | iOS-only FFI shims (Swift ↔ Rust bridges for the AVFoundation pipeline) |
 | `hotkey/` | macOS-only (`#[cfg(target_os = "macos")]`). `event_tap.rs` installs CGEventTap; `mode.rs` defines `RecordingState`, `RecordingCommand`, `HotkeyEvent` |
-| `audio/capture.rs` | cpal recording; returns `(stop_tx, pcm_rx)` — drop `stop_tx` to stop |
+| `audio/capture.rs` | cpal recording; `start_recording` resolves the device synchronously and returns a `RecordingSession { stop_tx, pcm_rx, device_name, fell_back }` — drop `stop_tx` to stop. `device_name`/`fell_back` let the caller warn when the chosen mic was absent and the system default was used |
 | `audio/volume.rs` | Temporarily boost mic input gain during recording |
 | `audio/sound.rs` | Play completion chime |
 | `transcription/manager.rs` | Routes to the right provider; 3-attempt exponential-backoff retry |
@@ -80,6 +80,7 @@ make ui-build     # tsc + vite build
 | `commands/hud.rs` | Show/hide the macOS HUD panel |
 | `commands/shortcut.rs` | Hotkey capture for the settings UI |
 | `commands/model_download.rs` | Download Whisper models; emits `model_download_progress`. `resolve_model_path` joins the stored filename with `app_support_dir()/models/` |
+| `commands/diagnostics.rs` | Log access for bug reports. iOS: `read_ios_log`/`clear_ios_log` (FFI to Swift `WhispLogger`). macOS: `read_recent_logs` (newest daily files first, capped at 256 KB for copy/paste) and `open_log_dir` (reveal logs in Finder); both stubbed off-macOS so the shared `invoke_handler` stays uniform |
 | `commands/` | Tauri `#[command]` handlers — thin wrappers that call into the modules above |
 
 ### Frontend (`src-ui/src/`)
@@ -123,4 +124,5 @@ Tauri commands are the only IPC. Frontend calls `invoke("command_name", { ...arg
 - Config JSON: `~/Library/Application Support/com.whisp2.app/config.json`
 - History DB: `~/Library/Application Support/com.whisp2.app/history.db`
 - Downloaded Whisper models: `~/Library/Application Support/com.whisp2.app/models/`
+- Logs: `~/Library/Application Support/com.whisp2.app/logs/whisp.log.YYYY-MM-DD` (daily-rolling, written by `init_logging` in `lib.rs`; `prune_old_logs` deletes files older than `LOG_RETENTION_DAYS` (30) at startup)
 - API keys: macOS Keychain (service `com.whisp2.app`)
