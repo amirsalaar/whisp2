@@ -645,6 +645,44 @@ async fn spawn_mobile_audio_task(
 /// App entry point called by both `main.rs` (desktop) and the iOS/Android mobile_entry_point.
 /// All Tauri builder setup lives here so the iOS linker can find the required runtime symbols.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Daily log files older than this are deleted on startup so the logs directory
+/// never grows without bound. 30 days is plenty of history for a bug report.
+const LOG_RETENTION_DAYS: u64 = 30;
+
+/// Delete `whisp.log.*` files in `log_dir` whose last-modified time is older than
+/// `retention_days`. Best-effort: any IO error on an individual file is ignored
+/// so a single unreadable entry can't block logging from starting.
+fn prune_old_logs(log_dir: &std::path::Path, retention_days: u64) {
+    let cutoff = match std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(retention_days * 24 * 60 * 60))
+    {
+        Some(c) => c,
+        None => return,
+    };
+
+    let entries = match std::fs::read_dir(log_dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        // Only touch the rolling log files (`whisp.log` / `whisp.log.YYYY-MM-DD`).
+        if !name.to_string_lossy().starts_with("whisp.log") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok());
+        if let Some(modified) = modified {
+            if modified < cutoff {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+}
+
 /// Initialize tracing once at startup. Without this, every `tracing::*` call in
 /// the app is silently dropped — which left us blind while debugging. Writes to
 /// stdout and to a daily-rotated file under the app support dir so failures on a
@@ -662,6 +700,7 @@ fn init_logging() {
     if let Ok(dir) = config::persistence::app_support_dir() {
         let log_dir = dir.join("logs");
         if std::fs::create_dir_all(&log_dir).is_ok() {
+            prune_old_logs(&log_dir, LOG_RETENTION_DAYS);
             let appender = tracing_appender::rolling::daily(&log_dir, "whisp.log");
             // Non-blocking writer needs its guard kept alive for the process
             // lifetime; leak it intentionally.
@@ -771,6 +810,8 @@ pub fn run() {
                 commands::shortcut::install_shortcut,
                 commands::diagnostics::read_ios_log,
                 commands::diagnostics::clear_ios_log,
+                commands::diagnostics::read_recent_logs,
+                commands::diagnostics::open_log_dir,
             ]);
 
         #[cfg(target_os = "macos")]
@@ -1020,5 +1061,30 @@ mod tests {
         // belongs to the higher band.
         assert_eq!(classify_rms(DEAD_MIC_RMS_THRESHOLD), AudioLevel::Silent);
         assert_eq!(classify_rms(SILENCE_RMS_THRESHOLD), AudioLevel::Speech);
+    }
+
+    #[test]
+    fn test_prune_old_logs_removes_only_stale_log_files() {
+        use std::time::{Duration, SystemTime};
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+
+        let old_log = dir.join("whisp.log.2000-01-01");
+        let fresh_log = dir.join("whisp.log.2030-01-01");
+        let unrelated = dir.join("notes.txt");
+        std::fs::write(&old_log, b"old").unwrap();
+        std::fs::write(&fresh_log, b"fresh").unwrap();
+        std::fs::write(&unrelated, b"keep me").unwrap();
+
+        // Backdate the old log's mtime well beyond the retention window.
+        let stale = SystemTime::now() - Duration::from_secs(40 * 24 * 60 * 60);
+        filetime::set_file_mtime(&old_log, stale.into()).unwrap();
+
+        prune_old_logs(dir, 30);
+
+        assert!(!old_log.exists(), "stale log should be pruned");
+        assert!(fresh_log.exists(), "recent log should be kept");
+        assert!(unrelated.exists(), "non-log files must never be touched");
     }
 }

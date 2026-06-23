@@ -1,5 +1,22 @@
 # whisp-rs todos
 
+## Active: shareable logs + 30-day retention (2026-06-22)
+
+Goal: users can access/copy logs to share in a bug report; errors are captured;
+logs auto-pruned to 30 days so the dir never outgrows its size.
+
+- [x] init_logging: prune `whisp.log*` files older than 30 days at startup (by mtime);
+      `prune_old_logs` unit-tested (keeps recent + non-log files).
+- [x] diagnostics.rs (macos): `read_recent_logs()` — newest daily-log content,
+      size-capped (256KB) so it's copy/paste-friendly for an issue.
+- [x] diagnostics.rs (macos): `open_log_dir()` — reveal logs folder in Finder.
+- [x] Registered both commands in lib.rs invoke_handler (stubbed off-macOS).
+- [x] App.tsx: desktop Diagnostics → Application logs card (View / Copy / Open Folder),
+      mirroring the iOS on-device-log card.
+- [x] make check / lint-rs / test (41/41) / ui-build / build all green.
+
+
+
 ## Active: fix system-default mic silently capturing silence (2026-06-22)
 
 ### Root cause

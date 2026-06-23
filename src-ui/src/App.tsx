@@ -207,6 +207,8 @@ export default function App() {
   const [installShortcutMsg, setInstallShortcutMsg] = useState<string | null>(null);
   const [iosLog, setIosLog] = useState<string | null>(null);
   const [iosLogStatus, setIosLogStatus] = useState<string>("");
+  const [desktopLog, setDesktopLog] = useState<string | null>(null);
+  const [desktopLogStatus, setDesktopLogStatus] = useState<string>("");
 
   const isIos = platform === "ios";
 
@@ -464,6 +466,35 @@ export default function App() {
       trackTimeout(() => setIosLogStatus(""), 1500);
     } catch (e) {
       setIosLogStatus(`Clear failed: ${e}`);
+    }
+  }
+
+  async function loadDesktopLog() {
+    try {
+      const text = await invoke<string>("read_recent_logs");
+      setDesktopLog(text || "(log is empty — no events recorded yet)");
+    } catch (e) {
+      setDesktopLog(`Failed to read log: ${e}`);
+    }
+  }
+
+  async function copyDesktopLog() {
+    if (!desktopLog) return;
+    try {
+      await navigator.clipboard.writeText(desktopLog);
+      setDesktopLogStatus("Copied.");
+      trackTimeout(() => setDesktopLogStatus(""), 1500);
+    } catch (e) {
+      setDesktopLogStatus(`Copy failed: ${e}`);
+    }
+  }
+
+  async function openLogFolder() {
+    try {
+      await invoke("open_log_dir");
+    } catch (e) {
+      setDesktopLogStatus(`Couldn't open folder: ${e}`);
+      trackTimeout(() => setDesktopLogStatus(""), 2500);
     }
   }
 
@@ -1180,6 +1211,57 @@ export default function App() {
               </button>
               {statusMsg && <span className="status">{statusMsg}</span>}
             </div>
+
+            {!isIos && (
+              <div className="settings-section">
+                <div className="section-header">
+                  <h2 className="section-title">Diagnostics</h2>
+                </div>
+                <div className="settings-row">
+                  <div className="row-label">
+                    <div className="label-text">Application logs</div>
+                    <div className="label-hint">
+                      If something fails, open the logs and paste them into a
+                      GitHub issue. Logs are stored locally (kept 30 days) —
+                      nothing is uploaded.
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button className="btn-secondary" onClick={loadDesktopLog}>
+                      View Logs
+                    </button>
+                    <button className="btn-secondary" onClick={openLogFolder}>
+                      Open Folder
+                    </button>
+                  </div>
+                </div>
+                {desktopLog !== null && (
+                  <div className="settings-row" style={{ flexDirection: "column", alignItems: "stretch" }}>
+                    <textarea
+                      readOnly
+                      value={desktopLog}
+                      style={{
+                        width: "100%",
+                        minHeight: 200,
+                        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+                        fontSize: 11,
+                        padding: 8,
+                        whiteSpace: "pre",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+                      <button className="btn-secondary" onClick={copyDesktopLog}>
+                        Copy
+                      </button>
+                      <button className="btn-secondary" onClick={() => setDesktopLog(null)}>
+                        Hide
+                      </button>
+                      {desktopLogStatus && <span className="status">{desktopLogStatus}</span>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {isIos && (
               <div className="settings-section">
