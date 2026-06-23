@@ -137,7 +137,7 @@ PRs welcome. Good places to start:
 - Linux build target
 - Dictionary UX in the settings window
 
-See [CLAUDE.md](CLAUDE.md) for the architecture overview.
+See [CLAUDE.md](CLAUDE.md) for the architecture overview, and [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## License
 
