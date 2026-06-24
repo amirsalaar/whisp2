@@ -55,14 +55,14 @@ pub fn start_recording(device_name: Option<String>) -> Result<RecordingSession> 
                         name
                     );
                     (
-                        host.default_input_device().context("no default input device")?,
+                        resolve_system_default(&host).context("no default input device")?,
                         true,
                     )
                 }
             }
         }
         None => (
-            host.default_input_device().context("no default input device")?,
+            resolve_system_default(&host).context("no default input device")?,
             false,
         ),
     };
@@ -89,6 +89,113 @@ pub fn start_recording(device_name: Option<String>) -> Result<RecordingSession> 
     })
 }
 
+/// Resolves the device to record from when "System Default" is selected (or when a
+/// named device was missing and we're falling back). On macOS the OS-reported default
+/// input is frequently a *silent* virtual driver (Teams/Zoom loopback) or an idle
+/// Continuity device (iPhone mic) — opening it yields pure-zero buffers, which is the
+/// long-standing "System Default records nothing" bug. So we divert to the best real
+/// physical mic when the default looks unreliable. On other platforms (and when the
+/// default is already a real mic) this is just `default_input_device()`.
+#[allow(deprecated)] // device matched by `name()`; see list_input_devices
+fn resolve_system_default(host: &cpal::Host) -> Option<cpal::Device> {
+    let os_default = host.default_input_device();
+
+    #[cfg(target_os = "macos")]
+    {
+        let default_name = os_default.as_ref().and_then(|d| d.name().ok());
+
+        // (name, is_reliable_transport) for every input device, per CoreAudio.
+        let transports = macos_transport::input_device_reliability();
+        let candidates: Vec<(String, bool)> = host
+            .input_devices()
+            .map(|it| {
+                it.filter_map(|d| d.name().ok())
+                    .map(|n| {
+                        let reliable = transports.get(&n).copied().unwrap_or(false);
+                        (n, reliable)
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let default_pair = default_name
+            .as_deref()
+            .map(|n| (n, transports.get(n).copied().unwrap_or(false)));
+
+        if let Some(target) = choose_system_default(default_pair, &candidates) {
+            if let Some(name) = default_name.as_deref() {
+                tracing::warn!(
+                    "system-default input '{}' is a silent/virtual device — recording from '{}' instead",
+                    name, target
+                );
+            }
+            if let Some(dev) = host
+                .input_devices()
+                .ok()
+                .and_then(|mut it| it.find(|d| d.name().ok().as_deref() == Some(target)))
+            {
+                return Some(dev);
+            }
+        }
+    }
+
+    os_default
+}
+
+/// Pure selection logic (unit-tested). Given the OS default input as
+/// `(name, is_reliable)` and all input devices as `(name, is_reliable)`, returns
+/// `Some(name)` of a substitute physical mic when the default is unreliable and a
+/// reliable alternative exists, or `None` to keep the OS default as-is.
+#[cfg(target_os = "macos")]
+fn choose_system_default<'a>(
+    default: Option<(&str, bool)>,
+    candidates: &'a [(String, bool)],
+) -> Option<&'a str> {
+    let (_default_name, default_reliable) = default?;
+    if default_reliable {
+        return None; // OS default is a real mic — trust it.
+    }
+    // Default is virtual/Continuity/unknown: pick the first reliable physical mic.
+    candidates
+        .iter()
+        .find(|(_, reliable)| *reliable)
+        .map(|(name, _)| name.as_str())
+}
+
+/// CoreAudio transport type identifies how a device connects. Built-in, USB,
+/// Bluetooth, etc. deliver real audio; virtual loopback drivers and idle Continuity
+/// devices report silence, so they are NOT reliable defaults to auto-select.
+#[cfg(target_os = "macos")]
+fn is_reliable_transport(transport: u32) -> bool {
+    // kAudioDeviceTransportType* fourccs.
+    const BUILT_IN: u32 = u32::from_be_bytes(*b"bltn");
+    const USB: u32 = u32::from_be_bytes(*b"usb ");
+    const BLUETOOTH: u32 = u32::from_be_bytes(*b"blue");
+    const BLUETOOTH_LE: u32 = u32::from_be_bytes(*b"blea");
+    const HDMI: u32 = u32::from_be_bytes(*b"hdmi");
+    const DISPLAY_PORT: u32 = u32::from_be_bytes(*b"dprt");
+    const THUNDERBOLT: u32 = u32::from_be_bytes(*b"thun");
+    const PCI: u32 = u32::from_be_bytes(*b"pci ");
+    const FIREWIRE: u32 = u32::from_be_bytes(*b"1394");
+    const AIRPLAY: u32 = u32::from_be_bytes(*b"airp");
+    const AVB: u32 = u32::from_be_bytes(*b"eavb");
+
+    matches!(
+        transport,
+        BUILT_IN
+            | USB
+            | BLUETOOTH
+            | BLUETOOTH_LE
+            | HDMI
+            | DISPLAY_PORT
+            | THUNDERBOLT
+            | PCI
+            | FIREWIRE
+            | AIRPLAY
+            | AVB
+    )
+}
+
 fn record_until_stop(
     stop_rx: &mut mpsc::Receiver<()>,
     result_tx: mpsc::Sender<Vec<f32>>,
@@ -106,7 +213,9 @@ fn record_until_stop(
 
     tracing::info!(
         "device config: {} Hz, {} ch, format={:?}",
-        input_sample_rate, channels, sample_format
+        input_sample_rate,
+        channels,
+        sample_format
     );
 
     let captured: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
@@ -114,7 +223,13 @@ fn record_until_stop(
     // Build a stream that matches the device's native sample format.
     // Requesting f32 from a device that natively delivers i16 results in
     // CoreAudio silently returning zeros on many external USB mics.
-    let stream = build_input_stream(&device, &stream_config, sample_format, channels, Arc::clone(&captured))?;
+    let stream = build_input_stream(
+        &device,
+        &stream_config,
+        sample_format,
+        channels,
+        Arc::clone(&captured),
+    )?;
 
     stream.play()?;
 
@@ -139,7 +254,11 @@ fn record_until_stop(
             samples.len(), sample_format
         );
     } else {
-        tracing::debug!("captured {} samples at {} Hz", samples.len(), input_sample_rate);
+        tracing::debug!(
+            "captured {} samples at {} Hz",
+            samples.len(),
+            input_sample_rate
+        );
     }
 
     let resampled = if input_sample_rate != TARGET_SAMPLE_RATE {
@@ -162,41 +281,38 @@ fn build_input_stream(
     let err_fn = |e| tracing::error!("audio stream error: {}", e);
 
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            device.build_input_stream(
-                config,
-                move |data: &[f32], _| push_mono_f32(data, channels, &captured),
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::I16 => {
-            device.build_input_stream(
-                config,
-                move |data: &[i16], _| {
-                    let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                    push_mono_f32(&floats, channels, &captured);
-                },
-                err_fn,
-                None,
-            )?
-        }
-        SampleFormat::U16 => {
-            device.build_input_stream(
-                config,
-                move |data: &[u16], _| {
-                    let floats: Vec<f32> = data
-                        .iter()
-                        .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
-                        .collect();
-                    push_mono_f32(&floats, channels, &captured);
-                },
-                err_fn,
-                None,
-            )?
-        }
+        SampleFormat::F32 => device.build_input_stream(
+            config,
+            move |data: &[f32], _| push_mono_f32(data, channels, &captured),
+            err_fn,
+            None,
+        )?,
+        SampleFormat::I16 => device.build_input_stream(
+            config,
+            move |data: &[i16], _| {
+                let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
+                push_mono_f32(&floats, channels, &captured);
+            },
+            err_fn,
+            None,
+        )?,
+        SampleFormat::U16 => device.build_input_stream(
+            config,
+            move |data: &[u16], _| {
+                let floats: Vec<f32> = data
+                    .iter()
+                    .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
+                    .collect();
+                push_mono_f32(&floats, channels, &captured);
+            },
+            err_fn,
+            None,
+        )?,
         _ => {
-            tracing::warn!("unhandled sample format {:?}, attempting f32 fallback", sample_format);
+            tracing::warn!(
+                "unhandled sample format {:?}, attempting f32 fallback",
+                sample_format
+            );
             device.build_input_stream(
                 config,
                 move |data: &[f32], _| push_mono_f32(data, channels, &captured),
@@ -256,6 +372,181 @@ pub fn encode_wav(samples: &[f32]) -> Result<Vec<u8>> {
     }
     writer.finalize()?;
     Ok(buf)
+}
+
+/// CoreAudio device enumeration used to tell real mics from silent virtual/Continuity
+/// ones. Kept here (not in volume.rs) because it's only used to resolve the recording
+/// device. Returns a name→is_reliable map keyed by the same name string cpal reports,
+/// which matches CoreAudio's kAudioObjectPropertyName on macOS.
+#[cfg(target_os = "macos")]
+mod macos_transport {
+    use std::collections::HashMap;
+    use std::ffi::c_void;
+    use std::ptr;
+
+    const SYSTEM_OBJECT: u32 = 1;
+    const PROP_DEVICES: u32 = u32::from_be_bytes(*b"dev#"); // kAudioHardwarePropertyDevices
+    const PROP_NAME: u32 = u32::from_be_bytes(*b"lnam"); // kAudioObjectPropertyName
+    const PROP_TRANSPORT: u32 = u32::from_be_bytes(*b"tran"); // kAudioDevicePropertyTransportType
+    const PROP_STREAMS: u32 = u32::from_be_bytes(*b"stm#"); // kAudioDevicePropertyStreams
+    const SCOPE_GLOBAL: u32 = u32::from_be_bytes(*b"glob");
+    const SCOPE_INPUT: u32 = u32::from_be_bytes(*b"inpu");
+    const ELEMENT_MAIN: u32 = 0;
+    const CF_UTF8: u32 = 0x0800_0100;
+
+    #[repr(C)]
+    struct Addr {
+        selector: u32,
+        scope: u32,
+        element: u32,
+    }
+
+    #[link(name = "CoreAudio", kind = "framework")]
+    extern "C" {
+        fn AudioObjectGetPropertyDataSize(
+            id: u32,
+            addr: *const Addr,
+            qsz: u32,
+            q: *const c_void,
+            out: *mut u32,
+        ) -> i32;
+        fn AudioObjectGetPropertyData(
+            id: u32,
+            addr: *const Addr,
+            qsz: u32,
+            q: *const c_void,
+            sz: *mut u32,
+            data: *mut c_void,
+        ) -> i32;
+    }
+    #[link(name = "CoreFoundation", kind = "framework")]
+    extern "C" {
+        fn CFStringGetCString(s: *const c_void, buf: *mut u8, sz: isize, enc: u32) -> bool;
+        fn CFRelease(s: *const c_void);
+    }
+
+    fn prop_size(id: u32, sel: u32, scope: u32) -> Option<u32> {
+        let addr = Addr {
+            selector: sel,
+            scope,
+            element: ELEMENT_MAIN,
+        };
+        let mut sz = 0u32;
+        let r = unsafe { AudioObjectGetPropertyDataSize(id, &addr, 0, ptr::null(), &mut sz) };
+        if r == 0 {
+            Some(sz)
+        } else {
+            None
+        }
+    }
+
+    fn get_u32(id: u32, sel: u32, scope: u32) -> Option<u32> {
+        let addr = Addr {
+            selector: sel,
+            scope,
+            element: ELEMENT_MAIN,
+        };
+        let mut v = 0u32;
+        let mut sz = 4u32;
+        let r = unsafe {
+            AudioObjectGetPropertyData(
+                id,
+                &addr,
+                0,
+                ptr::null(),
+                &mut sz,
+                &mut v as *mut u32 as *mut c_void,
+            )
+        };
+        if r == 0 {
+            Some(v)
+        } else {
+            None
+        }
+    }
+
+    fn get_name(id: u32) -> Option<String> {
+        let addr = Addr {
+            selector: PROP_NAME,
+            scope: SCOPE_GLOBAL,
+            element: ELEMENT_MAIN,
+        };
+        let mut cf: *const c_void = ptr::null();
+        let mut sz = std::mem::size_of::<*const c_void>() as u32;
+        let r = unsafe {
+            AudioObjectGetPropertyData(
+                id,
+                &addr,
+                0,
+                ptr::null(),
+                &mut sz,
+                &mut cf as *mut _ as *mut c_void,
+            )
+        };
+        if r != 0 || cf.is_null() {
+            return None;
+        }
+        let mut buf = [0u8; 256];
+        let ok = unsafe { CFStringGetCString(cf, buf.as_mut_ptr(), buf.len() as isize, CF_UTF8) };
+        let name = if ok {
+            let end = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+            Some(String::from_utf8_lossy(&buf[..end]).into_owned())
+        } else {
+            None
+        };
+        unsafe { CFRelease(cf) };
+        name
+    }
+
+    fn has_input_stream(id: u32) -> bool {
+        prop_size(id, PROP_STREAMS, SCOPE_INPUT)
+            .map(|sz| sz > 0)
+            .unwrap_or(false)
+    }
+
+    /// Maps each input device's name to whether its CoreAudio transport type is a
+    /// reliable (real, audio-producing) connection. Devices we can't read are absent.
+    pub fn input_device_reliability() -> HashMap<String, bool> {
+        let mut out = HashMap::new();
+        let Some(sz) = prop_size(SYSTEM_OBJECT, PROP_DEVICES, SCOPE_GLOBAL) else {
+            return out;
+        };
+        let count = (sz / 4) as usize;
+        if count == 0 {
+            return out;
+        }
+        let mut ids = vec![0u32; count];
+        let addr = Addr {
+            selector: PROP_DEVICES,
+            scope: SCOPE_GLOBAL,
+            element: ELEMENT_MAIN,
+        };
+        let mut sz_io = sz;
+        let r = unsafe {
+            AudioObjectGetPropertyData(
+                SYSTEM_OBJECT,
+                &addr,
+                0,
+                ptr::null(),
+                &mut sz_io,
+                ids.as_mut_ptr() as *mut c_void,
+            )
+        };
+        if r != 0 {
+            return out;
+        }
+        for id in ids {
+            if !has_input_stream(id) {
+                continue;
+            }
+            let Some(name) = get_name(id) else { continue };
+            let reliable = get_u32(id, PROP_TRANSPORT, SCOPE_GLOBAL)
+                .map(super::is_reliable_transport)
+                .unwrap_or(false);
+            out.insert(name, reliable);
+        }
+        out
+    }
 }
 
 #[cfg(test)]
@@ -329,5 +620,78 @@ mod tests {
         push_mono_f32(&data, 1, &captured);
         let result = captured.lock().unwrap().clone();
         assert_eq!(result, data.to_vec());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_choose_system_default_substitutes_silent_default() {
+        // macOS picked a silent virtual loopback as the system default — we should
+        // divert to the real built-in mic instead.
+        let candidates = vec![
+            ("Microsoft Teams Audio".to_string(), false),
+            ("MacBook Pro Microphone".to_string(), true),
+        ];
+        assert_eq!(
+            choose_system_default(Some(("Microsoft Teams Audio", false)), &candidates),
+            Some("MacBook Pro Microphone"),
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_choose_system_default_substitutes_idle_continuity() {
+        // An idle iPhone Continuity mic as the default is silent — divert to built-in.
+        let candidates = vec![
+            ("Amirsalar's iPhone Microphone".to_string(), false),
+            ("MacBook Pro Microphone".to_string(), true),
+        ];
+        assert_eq!(
+            choose_system_default(Some(("Amirsalar's iPhone Microphone", false)), &candidates),
+            Some("MacBook Pro Microphone"),
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_choose_system_default_keeps_reliable_default() {
+        // The OS default is already a real mic — don't second-guess it.
+        let candidates = vec![
+            ("MacBook Pro Microphone".to_string(), true),
+            ("Microsoft Teams Audio".to_string(), false),
+        ];
+        assert_eq!(
+            choose_system_default(Some(("MacBook Pro Microphone", true)), &candidates),
+            None,
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_choose_system_default_no_reliable_alternative() {
+        // Default is silent but there's no real mic to switch to — stay put and let
+        // the dead-mic detector surface the problem rather than picking another dud.
+        let candidates = vec![("Microsoft Teams Audio".to_string(), false)];
+        assert_eq!(
+            choose_system_default(Some(("Microsoft Teams Audio", false)), &candidates),
+            None,
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_choose_system_default_unknown_default_is_left_alone() {
+        // Couldn't read the OS default's transport — don't override.
+        let candidates = vec![("MacBook Pro Microphone".to_string(), true)];
+        assert_eq!(choose_system_default(None, &candidates), None);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_is_reliable_transport() {
+        assert!(is_reliable_transport(u32::from_be_bytes(*b"bltn"))); // built-in
+        assert!(is_reliable_transport(u32::from_be_bytes(*b"usb "))); // USB
+        assert!(is_reliable_transport(u32::from_be_bytes(*b"blue"))); // Bluetooth
+        assert!(!is_reliable_transport(u32::from_be_bytes(*b"virt"))); // virtual driver
+        assert!(!is_reliable_transport(u32::from_be_bytes(*b"ccwd"))); // Continuity
     }
 }
