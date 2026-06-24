@@ -123,18 +123,29 @@ fn resolve_system_default(host: &cpal::Host) -> Option<cpal::Device> {
             .map(|n| (n, transports.get(n).copied().unwrap_or(false)));
 
         if let Some(target) = choose_system_default(default_pair, &candidates) {
-            if let Some(name) = default_name.as_deref() {
-                tracing::warn!(
-                    "system-default input '{}' is a silent/virtual device — recording from '{}' instead",
-                    name, target
-                );
-            }
-            if let Some(dev) = host
+            let found = host
                 .input_devices()
                 .ok()
-                .and_then(|mut it| it.find(|d| d.name().ok().as_deref() == Some(target)))
-            {
-                return Some(dev);
+                .and_then(|mut it| it.find(|d| d.name().ok().as_deref() == Some(target)));
+            match found {
+                // Only claim the substitution once we actually hold the device — the
+                // device list can change between enumerations (e.g. a USB mic
+                // unplugged), so logging before the lookup could falsely report a
+                // switch we didn't make.
+                Some(dev) => {
+                    let from = default_name.as_deref().unwrap_or("<unknown>");
+                    tracing::warn!(
+                        "system-default input '{}' is a silent/virtual device — recording from '{}' instead",
+                        from, target
+                    );
+                    return Some(dev);
+                }
+                None => {
+                    tracing::warn!(
+                        "substitute mic '{}' disappeared before it could be opened — using OS default",
+                        target
+                    );
+                }
             }
         }
     }
@@ -535,7 +546,12 @@ mod macos_transport {
         if r != 0 {
             return out;
         }
-        for id in ids {
+        // CoreAudio writes the actual byte count back into sz_io; if a device was
+        // removed between the size query and this call, the tail of `ids` is still
+        // zero (kAudioObjectUnknown). Bound iteration by the real count instead of
+        // relying on those zero IDs being skipped downstream.
+        let actual = (sz_io / 4) as usize;
+        for id in ids.into_iter().take(actual) {
             if !has_input_stream(id) {
                 continue;
             }
