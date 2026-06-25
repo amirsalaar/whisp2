@@ -1,0 +1,41 @@
+{
+  "skill_name": "falsify-with-disposable-harness",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "Our CSV importer keeps dropping rows that have unicode in them. I've 'fixed' the encoding handling three times now and it still happens in prod, but I literally cannot reproduce it locally. Here's the support log dump from the failing customer (attached). Figure out what's actually going on.",
+      "expected_output": "Recognizes the repeated-fix + can't-reproduce + handed-logs pattern as untrustworthy evidence; instead of patching from the log, builds a small throwaway program that runs the importer's real parse path on controlled unicode inputs side-by-side with the ASCII path to isolate the variable, falsifies the 'encoding is broken' assumption, then deletes the harness and adds a real test.",
+      "files": [],
+      "assertions": [
+        "States the load-bearing assumption that prior fixes depended on before proposing a new fix",
+        "Treats the provided log/repro as untrustworthy rather than reasoning directly from it",
+        "Proposes a small throwaway/disposable program that exercises the real importer code (not a reimplementation) under controlled inputs",
+        "Frames the harness as an attempt to falsify the hypothesis, not just to observe",
+        "Plans to delete the harness and lock the finding into a real test once root cause is found"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "I have two functions that are supposed to do the exact same normalization — normalize_v1 (legacy) and normalize_v2 (the rewrite). They pass the same unit tests but somehow v2 gives different search results in the app. They should be identical. What's different?",
+      "expected_output": "Treats 'should be identical' as a hypothesis to falsify rather than a fact; writes a one-process harness that feeds both functions the same inputs and prints comparable outputs side-by-side to surface the divergence under controlled conditions, narrows iteratively, and confirms findings against real behavior.",
+      "files": [],
+      "assertions": [
+        "Explicitly treats 'the two functions are identical' as a hypothesis to be tested, not a given",
+        "Runs both functions side-by-side in one process on the same controlled inputs",
+        "Prints/compares concrete comparable outputs to expose any divergence",
+        "Narrows iteratively (one variable per step) rather than guessing at the cause"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "Just shipped what I'm pretty sure is the fix for the timezone bug — the code in date_utils.py now uses UTC everywhere. Can you confirm it's actually fixed before I tell the customer?",
+      "expected_output": "Pushes back on confirming a fix from source alone; verifies corrected behavior at the boundary that matters (run the real code path / observe the produced output, not just read date_utils.py), ideally via a quick disposable check, and recommends locking the behavior in with a test.",
+      "files": [],
+      "assertions": [
+        "Declines to confirm the fix from reading the source/diff alone",
+        "Verifies corrected behavior by running the real code path and observing actual output at the boundary that matters",
+        "Recommends a regression test to lock in the corrected behavior"
+      ]
+    }
+  ]
+}
