@@ -61,7 +61,7 @@ make ui-build     # tsc + vite build
 | `app_context/mod.rs` | Shared platform-agnostic context handle (paths, logging) |
 | `ffi.rs` | iOS-only FFI shims (Swift ↔ Rust bridges for the AVFoundation pipeline) |
 | `hotkey/` | macOS-only (`#[cfg(target_os = "macos")]`). `event_tap.rs` installs CGEventTap; `mode.rs` defines `RecordingState`, `RecordingCommand`, `HotkeyEvent` |
-| `audio/capture.rs` | cpal recording; `start_recording` resolves the device synchronously and returns a `RecordingSession { stop_tx, pcm_rx, device_name, fell_back }` — drop `stop_tx` to stop. `device_name`/`fell_back` let the caller warn when the chosen mic was absent and the system default was used |
+| `audio/capture.rs` | cpal recording; `start_recording` resolves the device synchronously and returns a `RecordingSession { stop_tx, pcm_rx, device_name, fell_back }` — drop `stop_tx` to stop. `device_name`/`fell_back` let the caller warn when the chosen mic was absent and a substitute was used. "System Default" (and the named-device fallback) route through `resolve_system_default`, which on macOS queries CoreAudio `kAudioDevicePropertyTransportType` and diverts away from silent virtual/Continuity defaults (e.g. Teams/Zoom loopback, idle iPhone mic) to a real physical mic. Pure selection logic is `choose_system_default`/`is_reliable_transport`; CoreAudio enumeration is the macOS-only `macos_transport` submodule |
 | `audio/volume.rs` | Temporarily boost mic input gain during recording |
 | `audio/sound.rs` | Play completion chime |
 | `transcription/manager.rs` | Routes to the right provider; 3-attempt exponential-backoff retry |
