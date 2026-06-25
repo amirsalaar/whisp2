@@ -8,8 +8,10 @@ name: Release
 #     3. Push to main whose HEAD  → opt-in via [release], [release:minor], [release:major]
 #        commit contains [release]   in the commit message
 #
-#   Version files (src-tauri/tauri.conf.json + src-tauri/Cargo.toml) are updated
-#   on the runner only — CI never pushes commits back to main.
+#   Version files (src-tauri/tauri.conf.json + src-tauri/Cargo.toml) are bumped
+#   on the runner before the build, then — after a successful publish — synced
+#   back to main in a single [skip ci] commit so local/dev builds report the
+#   real shipped version instead of the 0.1.0 placeholder.
 #
 #   Signing degrades gracefully based on which secrets are configured:
 #     notarized  — cert + all 3 notary creds  → signed + notarized DMG only
@@ -323,3 +325,47 @@ jobs:
             ${{ env.DMG_PATH }}.sha256
             ${{ env.ZIP_PATH }}
             ${{ env.ZIP_PATH }}.sha256
+
+      # ── Sync version back to main ──────────────────────────────────────────
+      # The bump above happens only on the runner, so the committed sources sit
+      # at the 0.1.0 placeholder and every local `make build` is mis-stamped.
+      # After a successful publish, commit the resolved version onto main so dev
+      # builds match the release. [skip ci] avoids retriggering CI; the step is
+      # a no-op when main already matches $VERSION.
+      # $VERSION is validated to ^[0-9]+\.[0-9]+\.[0-9]+$ in "Resolve version",
+      # so it is safe to interpolate into the commands below.
+      - name: Sync version files back to main
+        if: success()
+        run: |
+          set -euo pipefail
+
+          # Drop the runner-only working-tree edits (build artifacts stay; they
+          # are untracked and never staged) so we can switch onto a clean main.
+          git checkout -- src-tauri/tauri.conf.json src-tauri/Cargo.toml Cargo.lock 2>/dev/null || true
+          git fetch origin main
+          git switch -C main origin/main
+
+          # Re-apply the resolved version on top of the latest main.
+          jq ".version = \"$VERSION\"" src-tauri/tauri.conf.json > /tmp/tc.json
+          mv /tmp/tc.json src-tauri/tauri.conf.json
+          # BSD sed (macos runner): "1,/pattern/" stops after the first match —
+          # targets [package] version, not dependency version lines.
+          sed -i '' "1,/^version/ s/^version = \"[^\"]*\"/version = \"$VERSION\"/" \
+            src-tauri/Cargo.toml
+          # Sync the whisp-rs entry in Cargo.lock directly: match the package
+          # header line, then rewrite the `version = ...` line that follows it.
+          # (A local workspace member's lock version mirrors its manifest, so
+          # `cargo update --precise` refuses it — edit the line deterministically.)
+          sed -i '' '/^name = "whisp-rs"$/{n;s/^version = ".*"/version = "'"$VERSION"'"/;}' \
+            Cargo.lock
+
+          if git diff --quiet -- src-tauri/tauri.conf.json src-tauri/Cargo.toml Cargo.lock; then
+            echo "main already at $VERSION — nothing to sync."
+            exit 0
+          fi
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src-tauri/tauri.conf.json src-tauri/Cargo.toml Cargo.lock
+          git commit -m "chore(release): sync version to ${VERSION} [skip ci]"
+          git push origin main
