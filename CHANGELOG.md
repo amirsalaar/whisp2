@@ -5,6 +5,16 @@ All notable changes to Whisp2 are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-06-24
+
+### Fixed
+- **"System Default" microphone now records reliably.** macOS often reports a
+  silent device as the default input — a virtual loopback driver (e.g. Microsoft
+  Teams/Zoom audio) or an idle Continuity device (e.g. an iPhone mic) — which
+  captured pure silence. Whisp now detects these by audio transport type and
+  records from a real physical mic (built-in, USB, Bluetooth, etc.) instead, so
+  "System Default" works without manually picking a mic.
+
 ## [1.2.0] - 2026-06-23
 
 ### Added
