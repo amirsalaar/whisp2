@@ -5,6 +5,15 @@ All notable changes to Whisp2 are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **App version is reported correctly in Get Info.** The bundled app was stamped
+  with the `0.1.0` placeholder because the version lived only in CI and was never
+  committed back to the source. The real version now ships in
+  `tauri.conf.json`/`Cargo.toml`, and the release workflow commits each bump back
+  to `main` so local builds match what's published.
+
 ## [1.2.1] - 2026-06-24
 
 ### Fixed

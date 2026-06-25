@@ -97,6 +97,6 @@ logs auto-pruned to 30 days so the dir never outgrows its size.
 - [ ] App-aware injection delay (5ms for terminal emulators vs 2ms default, uses `app_context::frontmost_bundle_id`)
 - [ ] CGEventTap health-check timer (re-enable tap every 5s if macOS silently disables it)
 - [ ] Completion sound (`play_completion_sound` config wired, no audio playback yet)
-- [ ] GitHub repo — create at github.com/amirsalaar/whisp-rs when ready to share
-- [ ] Universal binary build + notarization + DMG packaging (`cargo tauri build --target universal-apple-darwin`)
-- [ ] GitHub Actions CI — build on push to main, release on version tag
+- [x] GitHub repo — live at github.com/amirsalaar/whisp2
+- [ ] Universal binary build (`--target universal-apple-darwin`) — release.yml ships aarch64-only DMG today; signing/notarization/DMG already wired, universal arch still pending
+- [x] GitHub Actions CI — `.github/workflows/ci.yml` (check/test/clippy + frontend lint on push/PR to main) and `release.yml` (tag / workflow_dispatch / `[release]` trailer → build + sign + publish, version synced back to main)
