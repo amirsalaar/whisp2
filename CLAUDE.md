@@ -129,9 +129,9 @@ Tauri commands are the only IPC. Frontend calls `invoke("command_name", { ...arg
 
 ## Versioning & Release
 
-- **`src-tauri/tauri.conf.json` `version` is the source of truth** for the app version. Tauri stamps it into the bundle's `CFBundleShortVersionString`/`CFBundleVersion`, which is what Get Info and the About box show. `src-tauri/Cargo.toml` mirrors it; the root `VERSION` file is documentation only (nothing reads it). Keep all three in sync when bumping. Leaving these at the `0.1.0` placeholder makes every local `make build` report `0.1.0` even when releases are correct.
+- **`src-tauri/tauri.conf.json` `version` is the source of truth** for the app version. Tauri stamps it into the bundle's `CFBundleShortVersionString`/`CFBundleVersion`, which is what Get Info and the About box show. `src-tauri/Cargo.toml` (and `Cargo.lock`) mirror it. Keep them in sync when bumping. Leaving these at the `0.1.0` placeholder makes every local `make build` report `0.1.0` even when releases are correct.
 - **`.github/workflows/release.yml` is the release authority.** It bumps `tauri.conf.json` + `Cargo.toml` to the resolved version on the runner before building, then (after a successful publish) commits that version back to `main` in a `[skip ci]` commit so local/dev builds match what shipped. Three entry points: pushing a `vX.Y.Z` tag, `workflow_dispatch` (pick a bump or explicit version), or a push to `main` whose HEAD commit message contains `[release]` / `[release:minor]` / `[release:major]`.
-- **CHANGELOG.md follows Keep a Changelog + SemVer.** Add a dated section per release; `CHANGELOG.md`, `VERSION`, and the git tag should all agree on the version.
+- **CHANGELOG.md follows Keep a Changelog + SemVer.** Add a dated section per release; `CHANGELOG.md`, `tauri.conf.json`, and the git tag should all agree on the version.
 
 ## Repo Skills (`.claude/skills/`)
 
