@@ -1,6 +1,6 @@
 [package]
 name = "whisp-rs"
-version = "1.2.1"
+version = "1.2.2"
 edition = "2021"
 description = "macOS voice-to-text menu bar app"
 
