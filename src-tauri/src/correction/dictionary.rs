@@ -1,4 +1,5 @@
 use anyhow::Result;
+use regex::{NoExpand, Regex};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,16 +26,25 @@ pub fn save(entries: &[SubEntry]) -> Result<()> {
 }
 
 fn apply_entries(text: &str, entries: &[SubEntry]) -> String {
-    if entries.is_empty() {
-        return text.to_string();
-    }
-    let mut result = format!(" {} ", text);
+    let mut result = text.to_string();
     for entry in entries {
-        let from = format!(" {} ", entry.from);
-        let to = format!(" {} ", entry.to);
-        result = result.replace(&from, &to);
+        // Real transcripts arrive capitalized and punctuated ("Whisp rs."),
+        // so match case-insensitively on whole-word boundaries rather than by
+        // padding with literal spaces. `NoExpand` keeps `$`/`\` in the
+        // replacement literal (so "5 dollars" → "$5" doesn't try to expand a
+        // capture group). The replacement text is used verbatim, so the stored
+        // casing wins — that's the point of a substitution dictionary.
+        let trimmed = entry.from.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let pattern = format!(r"(?i)\b{}\b", regex::escape(trimmed));
+        let Ok(re) = Regex::new(&pattern) else {
+            continue;
+        };
+        result = re.replace_all(&result, NoExpand(&entry.to)).into_owned();
     }
-    result.trim().to_string()
+    result
 }
 
 pub fn apply(text: String) -> String {
@@ -81,5 +91,73 @@ mod tests {
     fn test_apply_empty_entries() {
         let entries: Vec<SubEntry> = vec![];
         assert_eq!(apply_entries("hello", &entries), "hello");
+    }
+
+    // Real transcripts arrive capitalized; the match must be case-insensitive
+    // while the replacement keeps the stored canonical casing.
+    #[test]
+    fn test_apply_case_insensitive_match() {
+        let entries = vec![entry("whisp rs", "whisp-rs")];
+        assert_eq!(apply_entries("Whisp rs", &entries), "whisp-rs");
+        assert_eq!(apply_entries("Ok then", &[entry("ok", "okay")]), "okay then");
+    }
+
+    // Trailing/leading punctuation must not defeat the boundary match.
+    #[test]
+    fn test_apply_with_punctuation() {
+        let entries = vec![entry("whisp rs", "whisp-rs")];
+        assert_eq!(apply_entries("I love whisp rs.", &entries), "I love whisp-rs.");
+        assert_eq!(apply_entries("ok, sure", &[entry("ok", "okay")]), "okay, sure");
+    }
+
+    // Adjacent repeats: the old space-padding hack consumed the shared space
+    // and missed the second occurrence.
+    #[test]
+    fn test_apply_adjacent_repeats() {
+        let entries = vec![entry("ok", "okay")];
+        assert_eq!(apply_entries("ok ok", &entries), "okay okay");
+    }
+
+    // A `from` must only match whole words, never a substring.
+    #[test]
+    fn test_apply_no_substring_match() {
+        let entries = vec![entry("rs", "RS")];
+        assert_eq!(apply_entries("rstuff stays", &entries), "rstuff stays");
+        assert_eq!(apply_entries("the rs file", &entries), "the RS file");
+    }
+
+    // Replacement text is literal: `$`/`\` must not trigger regex expansion.
+    #[test]
+    fn test_apply_literal_replacement() {
+        let entries = vec![entry("five dollars", "$5")];
+        assert_eq!(apply_entries("cost five dollars", &entries), "cost $5");
+    }
+
+    // A blank `from` entry is skipped, not applied as a match-everything rule.
+    #[test]
+    fn test_apply_skips_blank_from() {
+        let entries = vec![entry("  ", "x"), entry("ok", "okay")];
+        assert_eq!(apply_entries("ok", &entries), "okay");
+    }
+
+    // End-to-end: the public apply() reads dictionary.json from the app support
+    // dir, so exercise the real save -> load -> apply path the transcription
+    // pipeline uses. This is the path that was silently no-op'ing before the
+    // fix; the apply_entries tests above only cover the in-memory matcher.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn test_apply_reads_from_disk_and_substitutes() {
+        // apply() -> load() resolves dictionary.json under app_support_dir(),
+        // which is keyed off HOME; the shared guard serializes the env mutation
+        // against every other HOME-mutating test in the binary.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _guard = crate::test_support::HomeGuard::new(tmp.path());
+
+        save(&[entry("whisp rs", "whisp-rs")]).expect("save dictionary");
+
+        // Capitalized + punctuated, exactly like a real transcript.
+        let out = apply("I love Whisp rs.".to_string());
+
+        assert_eq!(out, "I love whisp-rs.");
     }
 }

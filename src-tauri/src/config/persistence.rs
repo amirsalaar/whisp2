@@ -116,34 +116,7 @@ fn copy_dir_all(src: &PathBuf, dst: &PathBuf) -> Result<()> {
 mod tests {
     use super::*;
     use crate::config::models::TranscriptionProvider;
-    use std::sync::Mutex;
-
-    // Tests in this module mutate the process-wide HOME env var. Serialize
-    // them so they don't race each other.
-    static HOME_LOCK: Mutex<()> = Mutex::new(());
-
-    struct HomeGuard {
-        _lock: std::sync::MutexGuard<'static, ()>,
-        previous: Option<String>,
-    }
-
-    impl HomeGuard {
-        fn new(new_home: &std::path::Path) -> Self {
-            let lock = HOME_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-            let previous = std::env::var("HOME").ok();
-            std::env::set_var("HOME", new_home);
-            Self { _lock: lock, previous }
-        }
-    }
-
-    impl Drop for HomeGuard {
-        fn drop(&mut self) {
-            match &self.previous {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
-            }
-        }
-    }
+    use crate::test_support::HomeGuard;
 
     #[test]
     #[cfg(target_os = "macos")]

@@ -35,6 +35,9 @@ pub mod app_context;
 pub mod injection;
 pub mod permissions;
 
+#[cfg(test)]
+pub(crate) mod test_support;
+
 /// Below this RMS energy, a recording is treated as silence and skipped to
 /// avoid Whisper hallucinating filler like "Thank you." on quiet audio.
 /// True silence/room noise is ~0.001–0.002; soft speech is typically >0.01.

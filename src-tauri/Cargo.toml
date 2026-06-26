@@ -56,6 +56,9 @@ tracing-appender = "0.2"
 anyhow = "1"
 thiserror = "2"
 
+# Dictionary word-boundary substitution
+regex = "1"
+
 # Base64 (for audio encoding to API)
 base64 = "0.22"
 
