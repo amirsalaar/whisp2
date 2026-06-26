@@ -1,5 +1,5 @@
 use anyhow::Result;
-use regex::{NoExpand, Regex};
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,16 +29,40 @@ fn is_word_char(c: char) -> bool {
     c.is_alphanumeric() || c == '_'
 }
 
+/// Replaces whole-word, case-insensitive occurrences of `from` with `to`.
+///
+/// A match counts as whole-word only when neither neighbor is a word char, so
+/// "rs" won't fire inside "rstuff" and "c++" won't fire inside "c++17". We
+/// check neighbors manually instead of wrapping the pattern in `\b...\b`
+/// because `\b` only fires at a word/non-word transition: a key whose own
+/// endpoint is a symbol (".net", "C++") never sits next to such a transition,
+/// so `\b` would either drop it entirely or over-match into a larger token.
+/// The neighbor check is uniform for word-char and symbol keys alike.
+///
+/// `to` is inserted verbatim (no regex expansion of `$`/`\`), so the stored
+/// casing wins — that's the point of a substitution dictionary.
+fn replace_whole_word(text: &str, from: &str, to: &str) -> String {
+    let Ok(re) = Regex::new(&format!("(?i){}", regex::escape(from))) else {
+        return text.to_string();
+    };
+    let mut out = String::with_capacity(text.len());
+    let mut last = 0;
+    for m in re.find_iter(text) {
+        let before_ok = text[..m.start()].chars().next_back().is_none_or(|c| !is_word_char(c));
+        let after_ok = text[m.end()..].chars().next().is_none_or(|c| !is_word_char(c));
+        if before_ok && after_ok {
+            out.push_str(&text[last..m.start()]);
+            out.push_str(to);
+            last = m.end();
+        }
+    }
+    out.push_str(&text[last..]);
+    out
+}
+
 fn apply_entries(text: &str, entries: &[SubEntry]) -> String {
     let mut result = text.to_string();
     for entry in entries {
-        // Real transcripts arrive capitalized and punctuated ("Whisp rs."),
-        // so match case-insensitively on whole-word boundaries rather than by
-        // padding with literal spaces. `NoExpand` keeps `$`/`\` in the
-        // replacement literal (so "5 dollars" → "$5" doesn't try to expand a
-        // capture group). The replacement text is used verbatim, so the stored
-        // casing wins — that's the point of a substitution dictionary.
-        //
         // Entries are applied in order over the running result, so a later
         // entry can rewrite an earlier entry's output (see
         // test_apply_entries_cascade) — that ordered behavior is intentional.
@@ -46,18 +70,7 @@ fn apply_entries(text: &str, entries: &[SubEntry]) -> String {
         if trimmed.is_empty() {
             continue;
         }
-        // `\b` only fires between a word and a non-word char, so anchoring both
-        // ends unconditionally would make a key whose own endpoint is a symbol
-        // (".net", "C++") never match. Anchor an end only when the key's own
-        // char there is a word char; otherwise the symbol itself is the
-        // boundary.
-        let lead = if trimmed.starts_with(is_word_char) { r"\b" } else { "" };
-        let trail = if trimmed.ends_with(is_word_char) { r"\b" } else { "" };
-        let pattern = format!("(?i){lead}{}{trail}", regex::escape(trimmed));
-        let Ok(re) = Regex::new(&pattern) else {
-            continue;
-        };
-        result = re.replace_all(&result, NoExpand(&entry.to)).into_owned();
+        result = replace_whole_word(&result, trimmed, &entry.to);
     }
     result
 }
@@ -155,14 +168,19 @@ mod tests {
         assert_eq!(apply_entries("ok", &entries), "okay");
     }
 
-    // Keys whose own endpoint is a symbol (".net", "c++") must still match —
-    // \b can't anchor next to a non-word char, so those ends go unanchored.
+    // Keys whose own endpoint is a symbol (".net", "c++") must match when they
+    // stand alone but NOT when glued inside a larger token. The manual neighbor
+    // check handles both — `\b` cannot.
     #[test]
     fn test_apply_non_word_endpoint_keys() {
         assert_eq!(apply_entries("i use c++", &[entry("c++", "C++")]), "i use C++");
         assert_eq!(apply_entries("love .net", &[entry(".net", ".NET")]), "love .NET");
-        // The unanchored side must not over-match into a larger token.
-        assert_eq!(apply_entries("gcc", &[entry("c++", "C++")]), "gcc");
+        // Must not over-match into a larger token on the symbol side.
+        assert_eq!(apply_entries("c++17", &[entry("c++", "C++")]), "c++17");
+        assert_eq!(
+            apply_entries("example.net", &[entry(".net", ".NET")]),
+            "example.net"
+        );
         // A word-char endpoint still gets a boundary (no substring match).
         assert_eq!(apply_entries("rstuff", &[entry("rs", "RS")]), "rstuff");
     }
