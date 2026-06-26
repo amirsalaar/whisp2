@@ -25,6 +25,10 @@ pub fn save(entries: &[SubEntry]) -> Result<()> {
     Ok(())
 }
 
+fn is_word_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '_'
+}
+
 fn apply_entries(text: &str, entries: &[SubEntry]) -> String {
     let mut result = text.to_string();
     for entry in entries {
@@ -34,11 +38,22 @@ fn apply_entries(text: &str, entries: &[SubEntry]) -> String {
         // replacement literal (so "5 dollars" → "$5" doesn't try to expand a
         // capture group). The replacement text is used verbatim, so the stored
         // casing wins — that's the point of a substitution dictionary.
+        //
+        // Entries are applied in order over the running result, so a later
+        // entry can rewrite an earlier entry's output (see
+        // test_apply_entries_cascade) — that ordered behavior is intentional.
         let trimmed = entry.from.trim();
         if trimmed.is_empty() {
             continue;
         }
-        let pattern = format!(r"(?i)\b{}\b", regex::escape(trimmed));
+        // `\b` only fires between a word and a non-word char, so anchoring both
+        // ends unconditionally would make a key whose own endpoint is a symbol
+        // (".net", "C++") never match. Anchor an end only when the key's own
+        // char there is a word char; otherwise the symbol itself is the
+        // boundary.
+        let lead = if trimmed.starts_with(is_word_char) { r"\b" } else { "" };
+        let trail = if trimmed.ends_with(is_word_char) { r"\b" } else { "" };
+        let pattern = format!("(?i){lead}{}{trail}", regex::escape(trimmed));
         let Ok(re) = Regex::new(&pattern) else {
             continue;
         };
@@ -138,6 +153,26 @@ mod tests {
     fn test_apply_skips_blank_from() {
         let entries = vec![entry("  ", "x"), entry("ok", "okay")];
         assert_eq!(apply_entries("ok", &entries), "okay");
+    }
+
+    // Keys whose own endpoint is a symbol (".net", "c++") must still match —
+    // \b can't anchor next to a non-word char, so those ends go unanchored.
+    #[test]
+    fn test_apply_non_word_endpoint_keys() {
+        assert_eq!(apply_entries("i use c++", &[entry("c++", "C++")]), "i use C++");
+        assert_eq!(apply_entries("love .net", &[entry(".net", ".NET")]), "love .NET");
+        // The unanchored side must not over-match into a larger token.
+        assert_eq!(apply_entries("gcc", &[entry("c++", "C++")]), "gcc");
+        // A word-char endpoint still gets a boundary (no substring match).
+        assert_eq!(apply_entries("rstuff", &[entry("rs", "RS")]), "rstuff");
+    }
+
+    // Entries apply in order over the running result, so one entry can rewrite
+    // a previous entry's output. This cascade is intentional, not a bug.
+    #[test]
+    fn test_apply_entries_cascade() {
+        let entries = vec![entry("foo", "bar"), entry("bar", "baz")];
+        assert_eq!(apply_entries("foo", &entries), "baz");
     }
 
     // End-to-end: the public apply() reads dictionary.json from the app support
