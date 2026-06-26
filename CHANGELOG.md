@@ -8,6 +8,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ## [Unreleased]
 
 ### Fixed
+- **Dictionary substitutions are now applied to transcriptions.** Stored
+  word/phrase corrections were silently ignored: the matcher only fired on
+  lowercase, unpunctuated, space-separated text, so real transcripts (which are
+  capitalized and punctuated, e.g. "Whisp rs.") never matched and the
+  substitution was dropped. Corrections now match whole words case-insensitively
+  and survive surrounding punctuation, including keys with symbol endpoints like
+  ".net" or "C++" — while still leaving substrings inside larger words untouched.
 - **App version is reported correctly in Get Info.** The bundled app was stamped
   with the `0.1.0` placeholder because the version lived only in CI and was never
   committed back to the source. The real version now ships in
