@@ -81,6 +81,8 @@ pub struct AppState {
     pub db: sqlx::SqlitePool,
     pub hotkey_mask: Arc<AtomicU64>,
     pub whisper_ctx: crate::transcription::providers::local_whisper::WhisperCtxCache,
+    #[cfg(target_os = "macos")]
+    pub parakeet_ctx: crate::transcription::providers::parakeet::ParakeetCtxCache,
     pub download_abort: Arc<AtomicBool>,
     pub recording_cmd_tx: mpsc::Sender<RecordingCommand>,
 }
@@ -241,6 +243,7 @@ pub fn spawn_tasks(
                         let app_id = source_app.take();
                         let device_label = active_device.take().unwrap_or_else(|| "the microphone".into());
                         let whisper_ctx = Arc::clone(&state_arc.whisper_ctx);
+                        let parakeet_ctx = Arc::clone(&state_arc.parakeet_ctx);
 
                         tokio::spawn(async move {
                             let samples = rx.recv().await;
@@ -265,7 +268,7 @@ pub fn spawn_tasks(
                                     }
                                     match capture::encode_wav(&s) {
                                         Ok(wav) => {
-                                            match manager::transcribe(&config, wav, whisper_ctx).await {
+                                            match manager::transcribe(&config, wav, whisper_ctx, parakeet_ctx).await {
                                                 Ok(text) => {
                                                     tracing::info!("transcribed: {}", text);
                                                     let text = crate::correction::dictionary::apply(text);
@@ -754,6 +757,8 @@ pub fn run() {
             db,
             hotkey_mask: Arc::new(AtomicU64::new(0)),
             whisper_ctx: Arc::new(TokioMutex::new((None, None))),
+            #[cfg(target_os = "macos")]
+            parakeet_ctx: Arc::new(TokioMutex::new((None, None))),
             download_abort: Arc::new(AtomicBool::new(false)),
             recording_cmd_tx: cmd_tx,
         };
@@ -805,6 +810,9 @@ pub fn run() {
                 commands::model_download::get_downloaded_models,
                 commands::model_download::download_whisper_model,
                 commands::model_download::abort_model_download,
+                commands::model_download::list_parakeet_models,
+                commands::model_download::get_downloaded_parakeet_models,
+                commands::model_download::download_parakeet_model,
                 commands::audio::list_audio_input_devices,
                 commands::audio::start_recording_mobile,
                 commands::audio::stop_recording_mobile,
@@ -912,6 +920,12 @@ pub fn run() {
                             Some(name) => !commands::model_download::resolve_model_path(name)
                                 .map(|p| p.exists())
                                 .unwrap_or(false),
+                        },
+                        TranscriptionProvider::Parakeet => match cfg.parakeet_model_path.as_deref() {
+                            None => true,
+                            Some(name) => {
+                                !commands::model_download::parakeet_model_is_complete(name)
+                            }
                         },
                     };
                     if needs_setup {

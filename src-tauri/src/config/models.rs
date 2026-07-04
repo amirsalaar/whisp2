@@ -8,6 +8,7 @@ pub enum TranscriptionProvider {
     Groq,
     Gemini,
     LocalWhisper,
+    Parakeet,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -49,6 +50,9 @@ pub struct AppConfig {
     pub max_history_entries: Option<usize>,
     /// Path to a GGML `.bin` model file for local on-device transcription.
     pub local_whisper_model_path: Option<String>,
+    /// Directory name (under `models/`) holding the Parakeet ONNX weights
+    /// (encoder, decoder_joint, vocab.txt) for local on-device transcription.
+    pub parakeet_model_path: Option<String>,
     /// Name of the cpal input device to use. None = OS default.
     pub input_device: Option<String>,
 }
@@ -70,6 +74,7 @@ impl Default for AppConfig {
             language: None,
             max_history_entries: Some(500),
             local_whisper_model_path: None,
+            parakeet_model_path: None,
             input_device: None,
         }
     }

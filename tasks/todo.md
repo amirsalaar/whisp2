@@ -82,6 +82,13 @@ logs auto-pruned to 30 days so the dir never outgrows its size.
 
 ---
 
+## Follow-on: detected-language feedback for Parakeet (2026-07-03)
+
+- [ ] Parakeet auto-detects language but nothing tells the user WHICH language was
+      detected, so a wrong result is ambiguous (model error vs unsupported language).
+      Surface the detected language in the HUD or a log line to close the loop.
+      Surfaced during the Parakeet multi-language UX fix; deferred as separate scope.
+
 ## Remaining features
 
 - [ ] Toggle recording mode (currently only press-and-hold)

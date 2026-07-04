@@ -7,7 +7,30 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- **Local Parakeet transcription (on-device, no API key).** A new provider runs
+  NVIDIA's Parakeet-TDT-0.6B-v3 model fully on your Mac via ONNX Runtime — no
+  network once the model is downloaded, nothing sent to a cloud service. Pick
+  "Local Parakeet (on-device)" in Settings → Transcription, download the
+  quantized model (~685 MB) with one click, and dictate as usual. It
+  auto-detects and transcribes 25 European languages (English, Spanish, French,
+  German, Italian, Portuguese, Dutch, Russian, Ukrainian, Polish, and more) with
+  punctuation and capitalization, and on Apple Silicon it transcribes roughly
+  40x faster than real time on the CPU alone. The Settings screen lists the
+  supported languages and notes that non-European languages (Farsi, Arabic,
+  Chinese, Japanese, etc.) need OpenAI Whisper or Groq instead — Parakeet
+  auto-detects and can't be forced to a specific language. Sits alongside the
+  existing Local Whisper option as a faster, more accurate on-device choice.
+
 ### Fixed
+- **Saving settings no longer corrupts your API key.** When a key was already
+  stored, the field showed bullets (••••••••) as a placeholder. Clicking "Save"
+  without retyping stored those bullets as the actual key, so the next
+  transcription failed with "Invalid API Key" (a 401) — most visibly on Groq.
+  The app now refuses to persist the placeholder (or an empty value) both in the
+  UI and in the backend, so a real stored key survives an accidental save. Groq
+  API errors are also now labeled "Groq" in the logs instead of "OpenAI" (Groq
+  reuses the OpenAI-compatible client), so failures are no longer misattributed.
 - **Dictionary substitutions are now applied to transcriptions.** Stored
   word/phrase corrections were silently ignored: the matcher only fired on
   lowercase, unpunctuated, space-separated text, so real transcripts (which are

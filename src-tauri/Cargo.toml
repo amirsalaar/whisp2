@@ -96,6 +96,11 @@ tempfile = "3"
 filetime = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# NVIDIA Parakeet ASR via ONNX Runtime (CPU). Pulls `ort` with default
+# features so the ONNX Runtime binary is fetched/bundled at build time —
+# no separate dylib to ship. macOS-only: the desktop-oriented ort binary
+# download is not wired for the iOS FFI pipeline.
+parakeet-rs = "0.3"
 # macOS low-level bindings (CGEventTap, NSPanel, etc.)
 core-foundation = "0.10"
 core-graphics = { version = "0.24", features = ["highsierra"] }

@@ -6,7 +6,7 @@ import "./App.css";
 import Onboarding from "./Onboarding";
 
 interface AppConfig {
-  provider: "open_a_i" | "groq" | "gemini" | "local_whisper";
+  provider: "open_a_i" | "groq" | "gemini" | "local_whisper" | "parakeet";
   recording_mode: "press_and_hold" | "toggle";
   hotkey:
     | "left_option"
@@ -26,6 +26,7 @@ interface AppConfig {
   language: string | null;
   max_history_entries: number | null;
   local_whisper_model_path: string | null;
+  parakeet_model_path: string | null;
   input_device: string | null;
 }
 
@@ -58,6 +59,44 @@ interface DownloadProgress {
 }
 
 type Tab = "settings" | "history" | "dictionary" | "permissions";
+
+// Placeholder shown in an API-key field when a key is already stored, so we
+// never render the real secret. It is NOT a valid key — saveKey() refuses to
+// persist it, so clicking "Save" without retyping can't overwrite the real key
+// with these bullets (which is what produced Groq/OpenAI 401 "Invalid API Key").
+const MASKED_KEY = "••••••••";
+
+// The 25 languages Parakeet-TDT-0.6b-v3 supports (all European). The model
+// auto-detects among these — there is no way to force a language — so this list
+// is display-only. It is static model metadata (a property of the ONNX weights),
+// which is why it lives here and not behind a backend command.
+const PARAKEET_LANGUAGES = [
+  "Bulgarian",
+  "Croatian",
+  "Czech",
+  "Danish",
+  "Dutch",
+  "English",
+  "Estonian",
+  "Finnish",
+  "French",
+  "German",
+  "Greek",
+  "Hungarian",
+  "Italian",
+  "Latvian",
+  "Lithuanian",
+  "Maltese",
+  "Polish",
+  "Portuguese",
+  "Romanian",
+  "Russian",
+  "Slovak",
+  "Slovenian",
+  "Spanish",
+  "Swedish",
+  "Ukrainian",
+];
 
 // ── Toggle component ──────────────────────────────────────
 function Toggle({
@@ -197,7 +236,12 @@ export default function App() {
   const [dictTo, setDictTo] = useState("");
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [downloadedModels, setDownloadedModels] = useState<string[]>([]);
+  const [parakeetModels, setParakeetModels] = useState<ModelInfo[]>([]);
+  const [downloadedParakeetModels, setDownloadedParakeetModels] = useState<
+    string[]
+  >([]);
   const [downloadingModel, setDownloadingModel] = useState<string | null>(null);
+  const [showParakeetLangs, setShowParakeetLangs] = useState(false);
   const [downloadProgress, setDownloadProgress] =
     useState<DownloadProgress | null>(null);
   const [inputDevices, setInputDevices] = useState<string[]>([]);
@@ -276,16 +320,20 @@ export default function App() {
     });
     invoke<AppConfig>("get_config").then(setConfig);
     invoke<string | null>("get_api_key", { keyName: "openai_api_key" }).then(
-      (k) => k && setOpenaiKey("••••••••"),
+      (k) => k && setOpenaiKey(MASKED_KEY),
     );
     invoke<string | null>("get_api_key", { keyName: "groq_api_key" }).then(
-      (k) => k && setGroqKey("••••••••"),
+      (k) => k && setGroqKey(MASKED_KEY),
     );
     invoke<string | null>("get_api_key", { keyName: "gemini_api_key" }).then(
-      (k) => k && setGeminiKey("••••••••"),
+      (k) => k && setGeminiKey(MASKED_KEY),
     );
     invoke<ModelInfo[]>("list_whisper_models").then(setModels);
     invoke<string[]>("get_downloaded_models").then(setDownloadedModels);
+    invoke<ModelInfo[]>("list_parakeet_models").then(setParakeetModels);
+    invoke<string[]>("get_downloaded_parakeet_models").then(
+      setDownloadedParakeetModels,
+    );
     invoke<string[]>("list_audio_input_devices").then(setInputDevices);
 
     const onFocus = () => refreshPermissions();
@@ -357,8 +405,16 @@ export default function App() {
   }
 
   async function saveKey(keyName: string, value: string, onSaved: () => void) {
+    // Never persist the masked placeholder or an empty value — doing so would
+    // overwrite the real stored key with junk and cause a 401 on the next call.
+    const trimmed = value.trim();
+    if (trimmed === "" || trimmed === MASKED_KEY) {
+      setStatusMsg("Enter your API key first.");
+      trackTimeout(() => setStatusMsg(""), 2000);
+      return;
+    }
     try {
-      await invoke("set_api_key", { keyName, value });
+      await invoke("set_api_key", { keyName, value: trimmed });
       onSaved();
       setStatusMsg("API key saved.");
       trackTimeout(() => setStatusMsg(""), 2000);
@@ -401,6 +457,36 @@ export default function App() {
   async function selectDownloadedModel(m: ModelInfo) {
     if (!config) return;
     const updated = { ...config, local_whisper_model_path: m.filename };
+    setConfig(updated);
+    await invoke("set_config", { config: updated });
+  }
+
+  async function downloadParakeetModel(name: string) {
+    if (!config) return;
+    setDownloadingModel(name);
+    setDownloadProgress(null);
+    try {
+      const dir = await invoke<string>("download_parakeet_model", {
+        modelName: name,
+      });
+      setDownloadedParakeetModels((prev) => [...prev, name]);
+      const updated = { ...config, parakeet_model_path: dir };
+      setConfig(updated);
+      await invoke("set_config", { config: updated });
+    } catch (e) {
+      if (String(e) !== "Download aborted") {
+        setStatusMsg(`Download failed: ${e}`);
+        trackTimeout(() => setStatusMsg(""), 4000);
+      }
+    } finally {
+      setDownloadingModel(null);
+      setDownloadProgress(null);
+    }
+  }
+
+  async function selectDownloadedParakeetModel(m: ModelInfo) {
+    if (!config) return;
+    const updated = { ...config, parakeet_model_path: m.filename };
     setConfig(updated);
     await invoke("set_config", { config: updated });
   }
@@ -670,7 +756,12 @@ export default function App() {
                       <option value="open_a_i">OpenAI Whisper</option>
                       <option value="groq">Groq Whisper</option>
                       <option value="gemini">Gemini</option>
-                      <option value="local_whisper">Local (on-device)</option>
+                      <option value="local_whisper">
+                        Local Whisper (on-device)
+                      </option>
+                      <option value="parakeet">
+                        Local Parakeet (on-device)
+                      </option>
                     </select>
                   </div>
                 </div>
@@ -698,7 +789,7 @@ export default function App() {
                           className="btn-secondary"
                           onClick={() =>
                             saveKey("openai_api_key", openaiKey, () => {
-                              setOpenaiKey("••••••••");
+                              setOpenaiKey(MASKED_KEY);
                               setOpenaiKeyMasked(true);
                             })
                           }
@@ -776,7 +867,7 @@ export default function App() {
                           className="btn-secondary"
                           onClick={() =>
                             saveKey("groq_api_key", groqKey, () => {
-                              setGroqKey("••••••••");
+                              setGroqKey(MASKED_KEY);
                               setGroqKeyMasked(true);
                             })
                           }
@@ -853,7 +944,7 @@ export default function App() {
                           className="btn-secondary"
                           onClick={() =>
                             saveKey("gemini_api_key", geminiKey, () => {
-                              setGeminiKey("••••••••");
+                              setGeminiKey(MASKED_KEY);
                               setGeminiKeyMasked(true);
                             })
                           }
@@ -890,29 +981,63 @@ export default function App() {
                   </>
                 )}
 
-                {/* Language always visible */}
-                <div className="settings-row">
-                  <div className="row-label">
-                    <span className="row-title">Language</span>
-                    <span className="row-desc">
-                      Leave empty for auto-detect
-                    </span>
+                {/* Language: Parakeet auto-detects (no forcing API), so show a
+                    read-only note there. Every other provider honors the
+                    free-text language field. */}
+                {config.provider === "parakeet" ? (
+                  <div className="settings-row">
+                    <div className="row-label">
+                      <span className="row-title">Language</span>
+                      <span className="row-desc">
+                        Auto-detected. Parakeet supports 25 European languages;
+                        it can't be forced to a specific one.
+                      </span>
+                    </div>
+                    <div className="row-control">
+                      <button
+                        type="button"
+                        className="btn-ghost"
+                        onClick={() => setShowParakeetLangs((v) => !v)}
+                      >
+                        {showParakeetLangs ? "Hide" : "Show"} supported languages
+                      </button>
+                    </div>
                   </div>
-                  <div className="row-control">
-                    <input
-                      className="row-input"
-                      type="text"
-                      value={config.language ?? ""}
-                      placeholder="en, fa, de…"
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          language: e.target.value || null,
-                        })
-                      }
-                    />
+                ) : (
+                  <div className="settings-row">
+                    <div className="row-label">
+                      <span className="row-title">Language</span>
+                      <span className="row-desc">
+                        Leave empty for auto-detect
+                      </span>
+                    </div>
+                    <div className="row-control">
+                      <input
+                        className="row-input"
+                        type="text"
+                        value={config.language ?? ""}
+                        placeholder="en, fa, de…"
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            language: e.target.value || null,
+                          })
+                        }
+                      />
+                    </div>
                   </div>
-                </div>
+                )}
+                {config.provider === "parakeet" && showParakeetLangs && (
+                  <div className="settings-row">
+                    <div className="row-desc" style={{ lineHeight: 1.6 }}>
+                      {PARAKEET_LANGUAGES.join(", ")}.
+                      <br />
+                      Non-European languages (Farsi, Arabic, Chinese, Japanese,
+                      …) are not supported — use OpenAI Whisper or Groq for
+                      those.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -999,6 +1124,82 @@ export default function App() {
                   <button className="btn-secondary" onClick={pickModel}>
                     Browse…
                   </button>
+                </div>
+              </div>
+            )}
+
+            {/* Parakeet model catalog */}
+            {config.provider === "parakeet" && (
+              <div className="section-group">
+                <div className="section-label">Model</div>
+                <div className="model-catalog">
+                  {parakeetModels.map((m) => {
+                    const isDownloaded = downloadedParakeetModels.includes(
+                      m.name,
+                    );
+                    const isActive =
+                      config.parakeet_model_path === m.filename;
+                    const isDownloading = downloadingModel === m.name;
+                    const progress = isDownloading ? downloadProgress : null;
+                    const pct =
+                      progress && progress.total > 0
+                        ? Math.round(
+                            (progress.downloaded / progress.total) * 100,
+                          )
+                        : 0;
+                    return (
+                      <div
+                        key={m.name}
+                        className={`model-row${isActive ? " active" : ""}`}
+                      >
+                        <div className="model-info">
+                          <span className="model-name">{m.name}</span>
+                          <span className="model-meta">
+                            {m.description} · {m.size_mb} MB
+                          </span>
+                        </div>
+                        <div className="model-action">
+                          {isActive && (
+                            <span className="badge-active">Active</span>
+                          )}
+                          {isDownloaded && !isActive && (
+                            <button
+                              className="btn-secondary"
+                              onClick={() => selectDownloadedParakeetModel(m)}
+                            >
+                              Use
+                            </button>
+                          )}
+                          {!isDownloaded && !isDownloading && (
+                            <button
+                              className="btn-secondary"
+                              onClick={() => downloadParakeetModel(m.name)}
+                            >
+                              Download
+                            </button>
+                          )}
+                          {isDownloading && (
+                            <div className="download-progress">
+                              <div className="progress-bar">
+                                <div
+                                  className="progress-fill"
+                                  style={{ width: `${pct}%` }}
+                                />
+                              </div>
+                              <span className="progress-pct">{pct}%</span>
+                              <button
+                                className="btn-ghost"
+                                onClick={() => invoke("abort_model_download")}
+                                title="Abort"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

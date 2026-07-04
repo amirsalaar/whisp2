@@ -4,6 +4,8 @@ use std::time::Duration;
 use crate::config::models::{AppConfig, TranscriptionProvider};
 use crate::keychain;
 use crate::transcription::providers::local_whisper::{LocalWhisperProvider, WhisperCtxCache};
+#[cfg(target_os = "macos")]
+use crate::transcription::providers::parakeet::{ParakeetCtxCache, ParakeetProvider};
 
 use super::providers::gemini::GeminiProvider;
 use super::providers::openai::OpenAIProvider;
@@ -12,12 +14,14 @@ pub async fn transcribe(
     config: &AppConfig,
     wav_bytes: Vec<u8>,
     whisper_ctx: WhisperCtxCache,
+    #[cfg(target_os = "macos")] parakeet_ctx: ParakeetCtxCache,
 ) -> Result<String> {
     match &config.provider {
         TranscriptionProvider::OpenAI => {
             let api_key = keychain::get("openai_api_key")?
                 .ok_or_else(|| anyhow::anyhow!("OpenAI API key not set. Open Settings to configure."))?;
-            let provider = OpenAIProvider::new(
+            let provider = OpenAIProvider::with_label(
+                "OpenAI",
                 api_key,
                 config.openai_api_url.clone(),
                 config.openai_model.clone(),
@@ -28,7 +32,8 @@ pub async fn transcribe(
         TranscriptionProvider::Groq => {
             let api_key = keychain::get("groq_api_key")?
                 .ok_or_else(|| anyhow::anyhow!("Groq API key not set. Open Settings to configure."))?;
-            let provider = OpenAIProvider::new(
+            let provider = OpenAIProvider::with_label(
+                "Groq",
                 api_key,
                 config.groq_api_url.clone(),
                 config.groq_model.clone(),
@@ -62,6 +67,27 @@ pub async fn transcribe(
                 language: config.language.clone(),
             };
             provider.transcribe(wav_bytes).await
+        }
+        #[cfg(target_os = "macos")]
+        TranscriptionProvider::Parakeet => {
+            let stored = config
+                .parakeet_model_path
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!(
+                    "No Parakeet model downloaded. Choose one in Settings → Parakeet."
+                ))?;
+            let model_dir = crate::commands::model_download::resolve_model_path(stored)?
+                .to_string_lossy()
+                .into_owned();
+            let provider = ParakeetProvider {
+                model_dir,
+                ctx_cache: parakeet_ctx,
+            };
+            provider.transcribe(wav_bytes).await
+        }
+        #[cfg(not(target_os = "macos"))]
+        TranscriptionProvider::Parakeet => {
+            anyhow::bail!("Parakeet transcription is only available on macOS")
         }
     }
 }
