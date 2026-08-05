@@ -78,13 +78,40 @@ fn clamp_to_frame(
     (cx, cy)
 }
 
-/// Padded hit test backing the "cursor is near the island" affordance: is `point`
+/// Padded hit test backing the "cursor is over the island" affordance: is `point`
 /// inside `rect` grown by `padding` on every side? `rect` is `(x, y, width, height)`
 /// in whatever coordinate space `point` uses.
 pub fn is_within_padding(point: (f64, f64), rect: (f64, f64, f64, f64), padding: f64) -> bool {
     let (px, py) = point;
     let (x, y, w, h) = rect;
     px >= x - padding && px <= x + w + padding && py >= y - padding && py <= y + h + padding
+}
+
+/// Gap between the pill's bottom edge and the window's, mirroring `bottom: 8px`
+/// on `.hud-pill` in `hud.css`.
+pub const PILL_BOTTOM_INSET: f64 = 8.0;
+
+/// The pill's own rect inside the island's window.
+///
+/// The window is a fixed [`crate::hud::panel::HUD_SIZE`] rect while the pill inside
+/// it is much smaller and state-dependent — as little as 44x5 for the collapsed nub,
+/// inside a 340x88 window. Hit-testing the *window* therefore claims a hover from
+/// ~75pt above the nub, where there is nothing to see and nothing to hover; the
+/// island would expand with the cursor visibly nowhere near it.
+///
+/// Mirrors the CSS anchoring — `bottom: 8px; left: 50%; transform: translateX(-50%)`
+/// — so this must move in step with `.hud-pill` in `hud.css`.
+/// `window` is `(x, bottom, width, height)`; the returned rect shares its
+/// coordinate space and origin corner.
+pub fn pill_rect(window: (f64, f64, f64, f64), pill_size: (f64, f64)) -> (f64, f64, f64, f64) {
+    let (win_x, win_bottom, win_width, _) = window;
+    let (pill_width, pill_height) = pill_size;
+    (
+        win_x + (win_width - pill_width) / 2.0,
+        win_bottom + PILL_BOTTOM_INSET,
+        pill_width,
+        pill_height,
+    )
 }
 
 /// Converts a window's Tauri top-edge y (top-left origin, y grows down) into the
@@ -218,15 +245,12 @@ mod tests {
     #[test]
     fn the_hover_zone_tracks_the_island_through_the_coordinate_flip() {
         // The full round trip the proximity poll performs: place the island, read
-        // its Tauri top-left back, flip to AppKit, and hit-test the cursor. A cursor
-        // resting on the island's own center must register as near.
-        let (frame, height) = screen();
-        let (x, y) = resolve_position(None, frame, height, SIZE);
-        let bottom = appkit_bottom_from_tauri_top(y, SIZE.1, height);
-        let center = (x + SIZE.0 / 2.0, bottom + SIZE.1 / 2.0);
+        // its Tauri top-left back, flip to AppKit, derive the pill, and hit-test the
+        // cursor. A cursor resting on the nub must register.
+        let (window, on_nub) = island_at_rest();
         assert!(
-            is_within_padding(center, (x, bottom, SIZE.0, SIZE.1), 48.0),
-            "the cursor on the island's center must count as near"
+            is_within_padding(on_nub, pill_rect(window, NUB), SLACK),
+            "the cursor on the nub must count as hovered"
         );
     }
 
@@ -235,8 +259,8 @@ mod tests {
         // Why `hud::panel::tauri_flip_height` must be the *primary* display's height
         // and not `NSScreen::mainScreen`'s (which follows the key window): with a
         // 900pt-high primary and a focused 1440pt-high secondary, flipping against
-        // the wrong one puts the hot zone 540pt away — far outside the 48pt padding,
-        // so hovering the island would never expand it.
+        // the wrong one puts the hot zone 540pt away, so hovering the island would
+        // never expand it.
         let (frame, height) = screen();
         let (x, y) = resolve_position(None, frame, height, SIZE);
 
@@ -244,12 +268,120 @@ mod tests {
         let wrong = appkit_bottom_from_tauri_top(y, SIZE.1, 1440.0);
         assert_eq!(wrong - correct, 540.0, "the two flips must actually differ");
 
-        let cursor = (x + SIZE.0 / 2.0, correct + SIZE.1 / 2.0);
-        assert!(is_within_padding(cursor, (x, correct, SIZE.0, SIZE.1), 48.0));
+        let nub = pill_rect((x, correct, SIZE.0, SIZE.1), NUB);
+        let cursor = (nub.0 + NUB.0 / 2.0, nub.1 + NUB.1 / 2.0);
+        assert!(is_within_padding(cursor, nub, SLACK));
         assert!(
-            !is_within_padding(cursor, (x, wrong, SIZE.0, SIZE.1), 48.0),
+            !is_within_padding(cursor, pill_rect((x, wrong, SIZE.0, SIZE.1), NUB), SLACK),
             "the wrong flip height must miss — this is the multi-monitor bug"
         );
+    }
+
+    /// The collapsed nub and expanded pill, mirroring `hud::panel`'s constants.
+    const NUB: (f64, f64) = (44.0, 5.0);
+    const EXPANDED: (f64, f64) = (260.0, 62.0);
+    const SLACK: f64 = 10.0;
+
+    /// The island at its default spot, as `(window_rect, cursor_on_the_nub)` in
+    /// AppKit coordinates.
+    fn island_at_rest() -> ((f64, f64, f64, f64), (f64, f64)) {
+        let (frame, height) = screen();
+        let (x, y) = resolve_position(None, frame, height, SIZE);
+        let bottom = appkit_bottom_from_tauri_top(y, SIZE.1, height);
+        let window = (x, bottom, SIZE.0, SIZE.1);
+        let nub = pill_rect(window, NUB);
+        (window, (nub.0 + NUB.0 / 2.0, nub.1 + NUB.1 / 2.0))
+    }
+
+    #[test]
+    fn the_nub_is_centered_along_the_bottom_of_its_window() {
+        let (window, _) = island_at_rest();
+        let nub = pill_rect(window, NUB);
+        // Horizontally centered, and sitting PILL_BOTTOM_INSET above the window's
+        // bottom edge — mirroring `bottom: 8px` + `translateX(-50%)` in hud.css.
+        assert_eq!(nub.0 - window.0, (SIZE.0 - NUB.0) / 2.0);
+        assert_eq!(nub.1 - window.1, PILL_BOTTOM_INSET);
+        assert_eq!((nub.2, nub.3), NUB);
+        // Both rects share a horizontal center, so the nub can't drift sideways.
+        assert_eq!(nub.0 + nub.2 / 2.0, window.0 + window.2 / 2.0);
+    }
+
+    #[test]
+    fn hovering_the_nub_itself_registers() {
+        let (window, on_nub) = island_at_rest();
+        assert!(is_within_padding(on_nub, pill_rect(window, NUB), SLACK));
+    }
+
+    #[test]
+    fn empty_space_above_the_nub_does_not_register() {
+        // The bug this fixed: the window is 88pt tall while the nub is 5pt, so
+        // hit-testing the *window* claimed a hover from ~75pt above anything drawn
+        // — the island expanded with the cursor nowhere near it.
+        let (window, on_nub) = island_at_rest();
+        let empty = (on_nub.0, on_nub.1 + 60.0);
+
+        assert!(
+            is_within_padding(empty, window, 48.0),
+            "precondition: the old window-plus-padding test accepted this point"
+        );
+        assert!(
+            !is_within_padding(empty, pill_rect(window, NUB), SLACK),
+            "60pt above a 5pt nub is empty transparency and must not expand the island"
+        );
+    }
+
+    #[test]
+    fn the_hot_zone_is_a_small_multiple_of_the_nub_not_a_huge_one() {
+        // Guards the *feel*: the slack exists only to make a 5pt-tall target
+        // acquirable, so the zone must stay in the neighborhood of the nub. The
+        // window-based test was 80,224pt² against a 220pt² nub — 365x.
+        let (window, _) = island_at_rest();
+        let nub = pill_rect(window, NUB);
+        let zone = (nub.2 + 2.0 * SLACK) * (nub.3 + 2.0 * SLACK);
+        assert!(zone < 12.0 * (nub.2 * nub.3), "hot zone {zone}pt² is too generous");
+        // Still comfortably clickable: at least 24pt tall, Apple's minimum target.
+        assert!(nub.3 + 2.0 * SLACK >= 24.0);
+    }
+
+    #[test]
+    fn a_cursor_resting_on_the_expanded_pill_keeps_it_open() {
+        // Why the hit test follows the drawn state: opening the pill puts most of it
+        // *above* the nub the cursor landed on. Testing the nub while the expanded
+        // pill is showing would collapse it as soon as the user moved up to read it,
+        // reopen it on the way back, and flicker.
+        let (window, _) = island_at_rest();
+        let expanded = pill_rect(window, EXPANDED);
+        let reading = (expanded.0 + EXPANDED.0 / 2.0, expanded.1 + EXPANDED.1 - 8.0);
+
+        assert!(is_within_padding(reading, expanded, SLACK), "must stay open");
+        assert!(
+            !is_within_padding(reading, pill_rect(window, NUB), SLACK),
+            "precondition: this point is off the nub, so a nub-only test would flicker"
+        );
+    }
+
+    #[test]
+    fn leaving_the_expanded_pill_collapses_it() {
+        // The other half: the expanded rect must not be sticky either.
+        let (window, _) = island_at_rest();
+        let expanded = pill_rect(window, EXPANDED);
+        let above = (expanded.0 + EXPANDED.0 / 2.0, expanded.1 + EXPANDED.1 + SLACK + 1.0);
+        let beside = (expanded.0 - SLACK - 1.0, expanded.1 + EXPANDED.1 / 2.0);
+        assert!(!is_within_padding(above, expanded, SLACK));
+        assert!(!is_within_padding(beside, expanded, SLACK));
+    }
+
+    #[test]
+    fn the_pill_tracks_the_window_when_the_island_is_dragged() {
+        // The hot zone is derived from the live window rect, so dragging must carry
+        // it along rather than leaving it at the old spot.
+        let (window, on_nub) = island_at_rest();
+        let moved = (window.0 + 300.0, window.1 + 200.0, window.2, window.3);
+        let moved_nub = pill_rect(moved, NUB);
+
+        assert!(!is_within_padding(on_nub, moved_nub, SLACK), "old spot is now cold");
+        let follows = (on_nub.0 + 300.0, on_nub.1 + 200.0);
+        assert!(is_within_padding(follows, moved_nub, SLACK), "hot zone must follow");
     }
 
     #[test]

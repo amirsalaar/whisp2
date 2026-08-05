@@ -78,6 +78,29 @@ for ev in hud_state audio_level; do
 done
 
 echo
+echo "==> Hover hot zone matches the pill actually drawn"
+# The cursor hit test is computed in Rust from constants that mirror the CSS. If
+# the two drift the island expands where nothing is drawn (or stops expanding
+# where something is) — the exact bug this replaced, where the hot zone was the
+# 340x88 *window* plus 48pt of padding around a 44x5 nub: 365x the visible target.
+# So assert the numbers still agree. Each pair is "css-selector rust-const w h".
+while read -r selector rust_const w h; do
+  # The dimensions as CSS sees them: the rule block following the selector.
+  css_w=$(sed -n "/^\.hud-pill\.$selector {/,/}/p" "$HUD_CSS" | grep -oE 'width: [0-9]+px' | grep -oE '[0-9]+')
+  css_h=$(sed -n "/^\.hud-pill\.$selector {/,/}/p" "$HUD_CSS" | grep -oE 'height: [0-9]+px' | grep -oE '[0-9]+')
+  check ".hud-pill.$selector is ${w}x${h} in CSS" "[ '$css_w' = '$w' ] && [ '$css_h' = '$h' ]"
+  check "$rust_const agrees with it" \
+    "grep -qE '$rust_const: \(f64, f64\) = \($w\.0, $h\.0\)' $PANEL"
+done <<'PAIRS'
+collapsed-idle COLLAPSED_PILL 44 5
+expanded-idle EXPANDED_PILL 260 62
+PAIRS
+# The pill's bottom offset inside the window is mirrored the same way.
+css_inset=$(sed -n '/^\.hud-pill {/,/}/p' "$HUD_CSS" | grep -oE 'bottom: [0-9]+px' | grep -oE '[0-9]+')
+check "PILL_BOTTOM_INSET matches .hud-pill's 'bottom'" \
+  "grep -qE \"PILL_BOTTOM_INSET: f64 = ${css_inset}\.0\" src-tauri/src/hud/position.rs"
+
+echo
 if [ "$fail" -ne 0 ]; then
   echo "STATIC CHECKS FAILED"
   exit 1
@@ -108,6 +131,14 @@ Already verified against a running build (kept here as regression steps):
       the poll and swept the cursor across the pill: Rust's sampled cursor tracked
       the synthetic position exactly and the hit test flipped to true over the
       pill (29 consecutive hits), with the rect and flip height both correct.
+  [x] Hovering only expands ON the nub, not near it. Instrumented the poll and
+      warped the cursor to five points that the old window+48pt zone accepted —
+      75pt above, 40pt above, 120pt left, 120pt right, 30pt below the nub — each
+      approached from far away so the island was collapsed first. Zero
+      transitions; only the on-nub point expanded it. Approaching from collapsed
+      is the whole test: once expanded the pill really is 260x62, so a point 40pt
+      above the nub is legitimately on it, and probing without collapsing first
+      shows a "stay open" that proves nothing about the reported bug.
 
 Still needs a hand-run (all of these need a build whose signature still holds
 Accessibility — `run-dev.sh` re-signs ad-hoc, which revokes the grant, so

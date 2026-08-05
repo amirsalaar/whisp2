@@ -175,8 +175,8 @@ fn resolve_screen_position(saved: Option<(f64, f64)>, mtm: MainThreadMarker) -> 
 /// transition is longer than this, so the expansion still reads as immediate.
 const PROXIMITY_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
-/// Polls the cursor and reports *changes* in island proximity over
-/// `proximity_tx`, for the lifetime of the process.
+/// Polls the cursor and reports *changes* in whether it rests on the island's pill
+/// over `proximity_tx`, for the lifetime of the process.
 ///
 /// This deliberately polls instead of installing an `NSEvent`
 /// `addGlobalMonitorForEventsMatchingMask` mouse-moved monitor. That monitor was
@@ -192,15 +192,15 @@ const PROXIMITY_POLL: std::time::Duration = std::time::Duration::from_millis(100
 /// Accessibility or Input Monitoring permission.
 ///
 /// Sampling hops to the main thread: `NSEvent::mouseLocation` and the window
-/// geometry reads in [`cursor_is_near_hud`] are AppKit calls, and reading window
+/// geometry reads in [`cursor_is_over_pill`] are AppKit calls, and reading window
 /// geometry from the main thread also avoids a round-trip through tao's event-loop
 /// message channel. `run_on_main_thread` dispatches without blocking this task.
 /// While the island doesn't exist (turned off in
-/// Settings) the hop is skipped and proximity is simply reported as `false`, so
+/// Settings) the hop is skipped and the hover is simply reported as `false`, so
 /// the poll costs one map lookup per tick when the feature is off.
 ///
 /// Only transitions are sent. That keeps the FSM from waking on every sample, but
-/// it also means this task's idea of "near" must never diverge from the FSM's: the
+/// it also means this task's idea of "hovered" must never diverge from the FSM's: the
 /// FSM only ever learns of a change from a message here, so a transition dropped
 /// on the assumption that it doesn't matter would leave the island stuck on the
 /// stale value. Hence `false` is *sent* when the island disappears rather than
@@ -220,10 +220,13 @@ pub fn spawn_proximity_poll(app: AppHandle, proximity_tx: mpsc::Sender<bool>) {
             } else {
                 let (near_tx, near_rx) = tokio::sync::oneshot::channel();
                 let app_for_hop = app.clone();
+                // `last` is also "the pill is currently expanded", since that's the
+                // transition this task reports — so it selects which rect to test.
+                let was_expanded = last;
                 if app
                     .run_on_main_thread(move || {
                         let loc = NSEvent::mouseLocation();
-                        let _ = near_tx.send(cursor_is_near_hud(&app_for_hop, loc));
+                        let _ = near_tx.send(cursor_is_over_pill(&app_for_hop, loc, was_expanded));
                     })
                     .is_err()
                 {
@@ -246,13 +249,24 @@ pub fn spawn_proximity_poll(app: AppHandle, proximity_tx: mpsc::Sender<bool>) {
     });
 }
 
-/// Whether the cursor is close enough to the island to expand it. Reads the
-/// island's live position each call so dragging it moves the hot zone with it.
+/// Whether the cursor is on the island's pill. Reads the island's live position each
+/// call so dragging it moves the hot zone with it.
+///
+/// Hit-tests the **pill**, not its window: the window is a fixed [`HUD_SIZE`] rect
+/// that mostly holds empty transparency, so testing it expanded the island from well
+/// outside anything the user could see.
+///
+/// `expanded` selects which pill to test, and is what keeps the affordance stable.
+/// The pill grows on hover, so a cursor that landed on the nub sits near the
+/// *bottom* of the pill it just opened — testing the nub's 44x5 rect while the
+/// 260x62 pill is on screen would collapse it again the moment the user moved to
+/// read it, then reopen it as they moved back. Testing whatever is actually drawn
+/// makes leaving require leaving the pill.
 ///
 /// `cursor` is in AppKit screen coordinates (bottom-left origin), as reported by
 /// `NSEvent::mouseLocation`. Returns `false` if the window is gone or its geometry
-/// can't be read — a missing island simply never claims proximity.
-fn cursor_is_near_hud(app: &AppHandle, cursor: NSPoint) -> bool {
+/// can't be read — a missing island simply never claims a hover.
+fn cursor_is_over_pill(app: &AppHandle, cursor: NSPoint, expanded: bool) -> bool {
     let Some(window) = app.get_webview_window("hud") else { return false };
     let Ok(pos) = window.outer_position() else { return false };
     let Ok(size) = window.outer_size() else { return false };
@@ -271,11 +285,11 @@ fn cursor_is_near_hud(app: &AppHandle, cursor: NSPoint) -> bool {
 
     let bottom_appkit =
         crate::hud::position::appkit_bottom_from_tauri_top(top, height, screen_height);
-    crate::hud::position::is_within_padding(
-        (cursor.x, cursor.y),
+    let pill = crate::hud::position::pill_rect(
         (left, bottom_appkit, width, height),
-        PROXIMITY_PADDING,
-    )
+        if expanded { EXPANDED_PILL } else { COLLAPSED_PILL },
+    );
+    crate::hud::position::is_within_padding((cursor.x, cursor.y), pill, HOVER_SLACK)
 }
 
 fn apply_panel_flags(window: &tauri::WebviewWindow) {
@@ -301,9 +315,24 @@ fn apply_panel_flags(window: &tauri::WebviewWindow) {
     }
 }
 
-/// How close the cursor must come to the island before it expands, in points
-/// beyond the window's own bounds.
-const PROXIMITY_PADDING: f64 = 48.0;
+/// Logical size of the collapsed nub and the expanded pill, mirroring
+/// `.hud-pill.collapsed-idle` and `.hud-pill.expanded-idle` in `hud.css`.
+///
+/// These are the two the hover affordance switches between; the recording and error
+/// pills aren't hover-driven. Keep in step with the CSS or the hot zone drifts off
+/// what's drawn.
+const COLLAPSED_PILL: (f64, f64) = (44.0, 5.0);
+const EXPANDED_PILL: (f64, f64) = (260.0, 62.0);
+
+/// Slack around the pill's drawn edges, in points.
+///
+/// Not a proximity zone — it exists because the collapsed nub is 5pt tall, well
+/// under the ~24pt a pointer can comfortably acquire, so demanding a pixel-exact
+/// hit would make the island feel broken. This pads the nub to roughly 64x25:
+/// forgiving to land on, still unmistakably *on* the nub. Anything much larger and
+/// the island starts expanding at cursor positions where the user sees nothing to
+/// hover, which is the bug this replaced.
+const HOVER_SLACK: f64 = 10.0;
 
 /// The most recent `hud_state` payload, for replay when the island's webview
 /// finishes booting.

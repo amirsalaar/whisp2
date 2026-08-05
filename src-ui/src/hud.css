@@ -50,6 +50,14 @@
   height: 5px;
   border-radius: 3px;
   background: var(--pill-bg-collapsed);
+  /* The nub is the *only* thing to aim at, and hovering now requires landing on
+     it — so it has to stay visible against an arbitrary desktop. Translucent
+     white alone disappears over a light wallpaper. The hairline dark shadow gives
+     it an edge on pale backgrounds while reading as depth on dark ones, so the nub
+     is legible either way without brightening it into something that looks
+     clickable. Purely visual: the size is mirrored by COLLAPSED_PILL in
+     hud/panel.rs, so changing the geometry here moves the hover target too. */
+  box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.35);
 }
 
 /* — expanded-idle — */
@@ -64,6 +72,17 @@
   border-radius: 20px;
   box-shadow: var(--pill-shadow);
   cursor: grab;
+  /* Opening is faster than the shared 0.26s, and deliberately asymmetric with the
+     collapse. Hovering now means landing on a small nub, so the expansion is a
+     direct answer to an aimed gesture and has to feel immediate — it also absorbs
+     the proximity poll's sampling delay, which the user reads as part of the same
+     latency. Collapsing is nobody's goal, so it keeps the calmer default. */
+  transition:
+    width 0.19s cubic-bezier(0.22, 1.2, 0.36, 1),
+    height 0.19s cubic-bezier(0.22, 1.2, 0.36, 1),
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    opacity 0.14s ease;
 }
 
 .hud-pill.expanded-idle:active {

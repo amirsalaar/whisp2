@@ -131,3 +131,41 @@ as a new binary and drops the Accessibility grant — the log says
 `Accessibility not granted — hotkey recording disabled` and the hotkey silently
 does nothing. Re-grant in System Settings after building. Worth knowing that the
 island itself (hover, drag, paint) works fine without it.
+
+## Hit-test what's drawn, not the window it's drawn in.
+
+The island's hover zone was computed from its **window** rect (340x88) plus 48pt of
+padding, while the thing the user can actually see at rest is a 44x5 nub anchored
+`bottom: 8px` inside it. So the hot zone was 436x184 against a 220pt² target — 365x
+the visible affordance, and the island expanded with the cursor visibly nowhere near
+it. A transparent window is not its contents; if the affordance is smaller than the
+window, derive its rect (`hud::position::pill_rect`) and test that.
+
+Two consequences worth keeping:
+
+- **The hit test must follow the state it's driving.** The pill *grows* on hover, so
+  a cursor that landed on the nub ends up near the bottom of the 260x62 pill it just
+  opened. Testing the nub while the expanded pill is on screen collapses it the
+  moment the user moves up to read it, then reopens it — a flicker. So the poll's
+  "currently expanded" flag selects which rect to test.
+- **Slack is for acquirability, not proximity.** 10pt around a 5pt-tall nub buys the
+  ~24pt a pointer needs to land reliably. Anything much larger and you are back to
+  expanding where nothing is drawn.
+
+## Probing a hover fix only means something from the collapsed state.
+
+A probe that walked the cursor from "on the nub" to "40pt above the nub" reported
+"stays open" and looked like the bug surviving. It wasn't: once expanded the pill
+really is 260x62, so that point is legitimately on it. The bug only exists while
+**collapsed**, so each candidate point must be approached from far away — collapse
+first, then land. Same lesson as the timestamp mishap below: an ambiguous negative
+is usually the probe, not the code.
+
+## A log window that ends is not a condition that persists.
+
+Chasing a phantom "the island oscillates ~1/sec with the cursor parked far away":
+the flapping transitions were the previous probe's own warps, and the cursor
+position I read was sampled *after* that window had closed. The timestamps said so —
+they stopped and never resumed. Before diagnosing an anomaly, check the last
+event's time against *now*; a fresh run with nothing touching the mouse logged zero
+transitions in 28s and settled it.

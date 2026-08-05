@@ -7,6 +7,17 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+- **The floating island no longer expands when the cursor is nowhere near it.**
+  Hovering was triggered by a large invisible zone around the island — roughly
+  365 times the area of the small nub you actually see — so the pill would pop
+  open while the cursor was drifting past well above or to the side of it. It now
+  expands only when you move onto the nub itself, with just enough slack to make
+  such a small target easy to hit. Once open, the pill stays open as long as the
+  cursor is on it, so moving up to read it doesn't make it collapse. The nub also
+  picked up a hairline edge so it stays visible against light wallpapers, and
+  opening is now a touch snappier than closing.
+
 ## [1.5.0] - 2026-08-05
 
 ### Added
