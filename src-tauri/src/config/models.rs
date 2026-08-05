@@ -55,6 +55,12 @@ pub struct AppConfig {
     pub parakeet_model_path: Option<String>,
     /// Name of the cpal input device to use. None = OS default.
     pub input_device: Option<String>,
+    /// Where the user dragged the floating island, as a logical top-left position in
+    /// Tauri screen coordinates. None = the default bottom-center placement. Always
+    /// re-clamped onto the current screen at launch (see `hud::position`), so a
+    /// position saved on a since-disconnected display can't strand the window.
+    #[serde(default)]
+    pub hud_position: Option<(f64, f64)>,
 }
 
 impl Default for AppConfig {
@@ -76,6 +82,7 @@ impl Default for AppConfig {
             local_whisper_model_path: None,
             parakeet_model_path: None,
             input_device: None,
+            hud_position: None,
         }
     }
 }

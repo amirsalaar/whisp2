@@ -3,7 +3,10 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream};
 use rubato::{Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 use tokio::sync::mpsc;
+
+use crate::audio::level::LevelMeter;
 
 const TARGET_SAMPLE_RATE: u32 = 16_000;
 
@@ -18,6 +21,12 @@ pub fn list_input_devices() -> Vec<String> {
         .map(|devs| devs.filter_map(|d| d.name().ok()).collect())
         .unwrap_or_default()
 }
+
+/// Sink for the live mic level, called ~20x/second while recording so the floating
+/// island's waveform can follow the user's voice. Boxed rather than generic so
+/// `start_recording`'s signature stays simple; it's called far too rarely for the
+/// indirection to matter.
+pub type LevelSink = Box<dyn Fn(f32) + Send + 'static>;
 
 /// A live recording session. Carries the channels to stop capture and receive
 /// the resampled PCM, plus what device actually ended up being used so the caller
@@ -38,8 +47,13 @@ pub struct RecordingSession {
 /// resamples to 16 kHz mono f32 and sends the result. The device is resolved
 /// synchronously here (not on the capture thread) so the returned session can
 /// report the actual device name and whether a fallback occurred.
+///
+/// `level_sink`, when present, receives the smoothed live mic level for the HUD.
 #[allow(deprecated)] // device matched by `name()`; see list_input_devices
-pub fn start_recording(device_name: Option<String>) -> Result<RecordingSession> {
+pub fn start_recording(
+    device_name: Option<String>,
+    level_sink: Option<LevelSink>,
+) -> Result<RecordingSession> {
     let host = cpal::default_host();
 
     let (device, fell_back) = match &device_name {
@@ -76,7 +90,7 @@ pub fn start_recording(device_name: Option<String>) -> Result<RecordingSession> 
     let rt = tokio::runtime::Handle::current();
 
     std::thread::spawn(move || {
-        if let Err(e) = record_until_stop(&mut stop_rx, pcm_tx, rt, device) {
+        if let Err(e) = record_until_stop(&mut stop_rx, pcm_tx, rt, device, level_sink) {
             tracing::error!("audio capture error: {}", e);
         }
     });
@@ -212,6 +226,7 @@ fn record_until_stop(
     result_tx: mpsc::Sender<Vec<f32>>,
     rt: tokio::runtime::Handle,
     device: cpal::Device,
+    level_sink: Option<LevelSink>,
 ) -> Result<()> {
     let supported_config = device
         .default_input_config()
@@ -240,6 +255,7 @@ fn record_until_stop(
         sample_format,
         channels,
         Arc::clone(&captured),
+        level_sink,
     )?;
 
     stream.play()?;
@@ -288,13 +304,17 @@ fn build_input_stream(
     sample_format: SampleFormat,
     channels: usize,
     captured: Arc<Mutex<Vec<f32>>>,
+    level_sink: Option<LevelSink>,
 ) -> Result<Stream> {
     let err_fn = |e| tracing::error!("audio stream error: {}", e);
+
+    // The cpal callback is `FnMut`, so the meter can live by value inside it.
+    let mut meter = level_sink.map(|sink| (LevelMeter::new(), sink));
 
     let stream = match sample_format {
         SampleFormat::F32 => device.build_input_stream(
             config,
-            move |data: &[f32], _| push_mono_f32(data, channels, &captured),
+            move |data: &[f32], _| push_mono_f32(data, channels, &captured, meter.as_mut()),
             err_fn,
             None,
         )?,
@@ -302,7 +322,7 @@ fn build_input_stream(
             config,
             move |data: &[i16], _| {
                 let floats: Vec<f32> = data.iter().map(|&s| s as f32 / i16::MAX as f32).collect();
-                push_mono_f32(&floats, channels, &captured);
+                push_mono_f32(&floats, channels, &captured, meter.as_mut());
             },
             err_fn,
             None,
@@ -314,7 +334,7 @@ fn build_input_stream(
                     .iter()
                     .map(|&s| (s as f32 / u16::MAX as f32) * 2.0 - 1.0)
                     .collect();
-                push_mono_f32(&floats, channels, &captured);
+                push_mono_f32(&floats, channels, &captured, meter.as_mut());
             },
             err_fn,
             None,
@@ -326,7 +346,7 @@ fn build_input_stream(
             );
             device.build_input_stream(
                 config,
-                move |data: &[f32], _| push_mono_f32(data, channels, &captured),
+                move |data: &[f32], _| push_mono_f32(data, channels, &captured, meter.as_mut()),
                 err_fn,
                 None,
             )?
@@ -336,13 +356,33 @@ fn build_input_stream(
     Ok(stream)
 }
 
+/// Downmixes one callback buffer to mono, appends it to the recording, and feeds
+/// the live level meter.
+///
+/// When no meter is attached this appends straight into the capture buffer, as it
+/// always did. With a meter, the mono frames are collected first so the level can
+/// be computed *outside* the capture lock — the sink crosses into Tauri's IPC layer
+/// and must not run while the buffer is held.
 #[inline]
-fn push_mono_f32(data: &[f32], channels: usize, captured: &Arc<Mutex<Vec<f32>>>) {
-    let mut buf = captured.lock().unwrap();
+fn push_mono_f32(
+    data: &[f32],
+    channels: usize,
+    captured: &Arc<Mutex<Vec<f32>>>,
+    meter: Option<&mut (LevelMeter, LevelSink)>,
+) {
     let ch = channels.max(1);
-    for frame in data.chunks(ch) {
-        let mono = frame.iter().copied().sum::<f32>() / ch as f32;
-        buf.push(mono);
+    let to_mono = |frame: &[f32]| frame.iter().copied().sum::<f32>() / ch as f32;
+
+    let Some((meter, sink)) = meter else {
+        let mut buf = captured.lock().unwrap();
+        buf.extend(data.chunks(ch).map(to_mono));
+        return;
+    };
+
+    let mono: Vec<f32> = data.chunks(ch).map(to_mono).collect();
+    captured.lock().unwrap().extend_from_slice(&mono);
+    if let Some(level) = meter.push(&mono, Instant::now()) {
+        sink(level);
     }
 }
 
@@ -622,7 +662,7 @@ mod tests {
     fn test_push_mono_stereo_mix() {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let data = [0.4f32, 0.8f32, -0.2f32, 0.6f32];
-        push_mono_f32(&data, 2, &captured);
+        push_mono_f32(&data, 2, &captured, None);
         let result = captured.lock().unwrap().clone();
         assert_eq!(result.len(), 2);
         assert!((result[0] - 0.6f32).abs() < 1e-6);
@@ -633,9 +673,52 @@ mod tests {
     fn test_push_mono_mono_passthrough() {
         let captured = Arc::new(Mutex::new(Vec::new()));
         let data = [0.1f32, 0.5f32, -0.3f32];
-        push_mono_f32(&data, 1, &captured);
+        push_mono_f32(&data, 1, &captured, None);
         let result = captured.lock().unwrap().clone();
         assert_eq!(result, data.to_vec());
+    }
+
+    #[test]
+    fn test_push_mono_captures_identically_with_a_meter_attached() {
+        // The metered path takes a different branch through push_mono_f32; the
+        // audio that reaches the transcriber must not depend on whether the HUD
+        // happens to be listening.
+        let data = [0.4f32, 0.8f32, -0.2f32, 0.6f32];
+
+        let plain = Arc::new(Mutex::new(Vec::new()));
+        push_mono_f32(&data, 2, &plain, None);
+
+        let metered = Arc::new(Mutex::new(Vec::new()));
+        let sink: LevelSink = Box::new(|_| {});
+        let mut meter = (LevelMeter::new(), sink);
+        push_mono_f32(&data, 2, &metered, Some(&mut meter));
+
+        assert_eq!(*plain.lock().unwrap(), *metered.lock().unwrap());
+    }
+
+    #[test]
+    fn test_push_mono_reports_level_to_the_sink() {
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let seen_sink = Arc::clone(&seen);
+        let sink: LevelSink = Box::new(move |level| seen_sink.lock().unwrap().push(level));
+        let mut meter = (LevelMeter::new(), sink);
+
+        push_mono_f32(&[0.3f32; 256], 1, &captured, Some(&mut meter));
+
+        let levels = seen.lock().unwrap();
+        assert_eq!(levels.len(), 1, "first buffer should publish a level");
+        assert!(levels[0] > 0.0, "audible input reported as silence");
+    }
+
+    #[test]
+    fn test_push_mono_appends_across_calls() {
+        // Recording accumulates over the whole session; each callback appends
+        // rather than replacing.
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        push_mono_f32(&[0.1f32, 0.2f32], 1, &captured, None);
+        push_mono_f32(&[0.3f32], 1, &captured, None);
+        assert_eq!(*captured.lock().unwrap(), vec![0.1, 0.2, 0.3]);
     }
 
     #[cfg(target_os = "macos")]

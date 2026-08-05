@@ -28,6 +28,10 @@ interface AppConfig {
   local_whisper_model_path: string | null;
   parakeet_model_path: string | null;
   input_device: string | null;
+  /** Where the user dragged the floating island. Owned by the island's own drag
+   *  handler — `set_config` preserves the stored value and ignores whatever this
+   *  form sends, so it's never clobbered by an unrelated settings change. */
+  hud_position: [number, number] | null;
 }
 
 interface HistoryEntry {
@@ -1292,8 +1296,10 @@ export default function App() {
                 {!isIos && (
                   <div className="settings-row">
                     <div className="row-label">
-                      <span className="row-title">Show floating HUD</span>
-                      <span className="row-desc">Displays while recording</span>
+                      <span className="row-title">Floating island</span>
+                      <span className="row-desc">
+                        Live waveform and stop controls — drag it anywhere
+                      </span>
                     </div>
                     <div className="row-control">
                       <Toggle

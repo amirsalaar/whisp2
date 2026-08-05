@@ -1,162 +1,246 @@
+/* The floating island. Rendered imperatively by src/hud.ts inside a transparent,
+   always-on-top WebviewWindow — the class names here are the contract with that
+   file, and `.hud-pill.<state>` matches `HudState::as_str` in panel.rs. */
+
 :root {
-  --pill-bg: rgba(0, 0, 0, 0.84);
-  --pill-bg-collapsed: rgba(255, 255, 255, 0.12);
-  --pill-border: rgba(255, 255, 255, 0.16);
+  --pill-bg: rgba(18, 18, 20, 0.86);
+  --pill-bg-collapsed: rgba(255, 255, 255, 0.22);
+  --pill-border: rgba(255, 255, 255, 0.14);
   --text-primary: rgba(255, 255, 255, 0.96);
-  --text-muted: rgba(255, 255, 255, 0.62);
+  --text-muted: rgba(255, 255, 255, 0.58);
   --amber: rgb(230, 174, 61);
   --danger: rgb(224, 89, 71);
+  --pill-shadow: 0 8px 28px rgba(0, 0, 0, 0.42);
 }
 
+/* The window is a fixed 340x88 rect while the pill is much smaller, so the pill
+   is anchored to the bottom-center of that rect and grows upward. This keeps the
+   island visually rooted as it changes size, and leaves headroom above for the
+   drop shadow. */
 .hud-pill {
   position: fixed;
-  bottom: 0;
+  bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  border-radius: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  transition:
-    width 0.24s cubic-bezier(0.34, 1.56, 0.64, 1.0),
-    height 0.24s cubic-bezier(0.34, 1.56, 0.64, 1.0),
-    background-color 0.18s ease-in-out,
-    opacity 0.18s ease-in-out,
-    border-color 0.18s ease-in-out;
+  box-sizing: border-box;
   border: 1px solid transparent;
+  border-radius: 999px;
+  /* The window is larger than the pill and fully transparent, so anything that
+     escapes the pill paints as bare glyphs on the desktop. A long failure message
+     in `.hud-status` is the realistic case. Clips inside the rounded rect; the
+     drop shadow is unaffected (box-shadow is drawn outside the border box). */
+  overflow: hidden;
+  /* Springy width/height so state changes read as one object morphing rather
+     than separate pills swapping in. */
+  transition:
+    width 0.26s cubic-bezier(0.34, 1.4, 0.64, 1),
+    height 0.26s cubic-bezier(0.34, 1.4, 0.64, 1),
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    opacity 0.18s ease;
 }
 
+/* — collapsed-idle: a dim, click-through nub. The window ignores the cursor in
+     this state, so this must never look interactive. — */
 .hud-pill.collapsed-idle {
-  width: 50px;
-  height: 18px;
+  width: 44px;
+  height: 5px;
+  border-radius: 3px;
   background: var(--pill-bg-collapsed);
-  border-radius: 3.5px;
 }
 
+/* — expanded-idle — */
 .hud-pill.expanded-idle {
-  width: 340px;
-  height: 88px;
-  background: var(--pill-bg);
-  border-color: var(--pill-border);
-  border-radius: 22px;
+  width: 260px;
+  height: 62px;
   flex-direction: column;
-  gap: 6px;
-  padding: 16px 20px;
-}
-
-.hud-pill.shortcut-listening {
-  width: 76px;
-  height: 24px;
-  background: var(--pill-bg);
-  border-color: var(--pill-border);
-  border-radius: 12px;
   gap: 3px;
-  padding: 0 10px;
+  padding: 0 20px;
+  background: var(--pill-bg);
+  border-color: var(--pill-border);
+  border-radius: 20px;
+  box-shadow: var(--pill-shadow);
+  cursor: grab;
 }
 
+.hud-pill.expanded-idle:active {
+  cursor: grabbing;
+}
+
+/* — recording-controls — */
 .hud-pill.recording-controls {
-  width: 138px;
-  height: 40px;
+  width: 184px;
+  height: 48px;
+  gap: 10px;
+  padding: 0 12px;
   background: var(--pill-bg);
   border-color: var(--pill-border);
-  border-radius: 22px;
-  gap: 8px;
-  padding: 0 12px;
+  box-shadow: var(--pill-shadow);
 }
 
-.hud-pill.processing {
-  width: 220px;
+/* — processing / error: no controls, so the window is click-through here too. — */
+.hud-pill.processing,
+.hud-pill.error {
   height: 44px;
+  gap: 10px;
+  padding: 0 18px;
   background: var(--pill-bg);
   border-color: var(--pill-border);
-  border-radius: 22px;
-  gap: 10px;
-  padding: 0 16px;
+  box-shadow: var(--pill-shadow);
+}
+
+.hud-pill.processing { width: 188px; }
+
+.hud-pill.error {
+  /* Wider: the caption is a real failure message, not a fixed word. */
+  width: 316px;
+  border-color: var(--danger);
 }
 
 .hud-pill.hidden {
   opacity: 0;
   pointer-events: none;
-  width: 50px;
-  height: 18px;
+}
+
+/* ─── Text ─────────────────────────────────────────────────────────────────── */
+
+.hud-title,
+.hud-subtitle,
+.hud-status {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  user-select: none;
 }
 
 .hud-title {
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
 }
 
 .hud-subtitle {
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 12px;
+  font-size: 11.5px;
   color: var(--text-muted);
-  letter-spacing: -0.01em;
 }
 
 .hud-status {
-  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text-primary);
-  letter-spacing: -0.02em;
-  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* A flex item defaults to `min-width: auto` and refuses to shrink below its
+     content, so without these the ellipsis never engages and a long error
+     message overflows the pill instead of being truncated. */
+  min-width: 0;
+  flex: 1;
+  /* `flex: 1` makes this the full remaining width, so the pill's own
+     `justify-content: center` no longer centers a short caption. */
+  text-align: center;
 }
+
+/* ─── Waveform ─────────────────────────────────────────────────────────────── */
 
 .waveform {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 20px;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .waveform-bar {
-  width: 3px;
-  border-radius: 2px;
+  border-radius: 999px;
   background: var(--amber);
-  min-height: 4px;
-  transition: height 0.05s ease-out;
-}
-
-.hud-btn {
-  background: none;
-  border: 1.5px solid rgba(255, 255, 255, 0.3);
-  border-radius: 50%;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  color: var(--text-primary);
-  font-size: 12px;
-  transition: background 0.12s, border-color 0.12s;
+  /* Just longer than the backend's 50ms publish interval, so consecutive levels
+     blend into continuous motion instead of stepping. */
+  transition: height 0.06s linear;
   flex-shrink: 0;
 }
 
+/* ─── Buttons ──────────────────────────────────────────────────────────────── */
+
+.hud-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: 50%;
+  background: none;
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
 .hud-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
-  border-color: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.5);
 }
 
 .hud-btn.stop {
+  width: 30px;
+  height: 30px;
   background: var(--danger);
   border-color: var(--danger);
-  width: 32px;
-  height: 32px;
 }
 
 .hud-btn.stop:hover {
-  background: rgb(240, 100, 80);
+  background: rgb(240, 104, 86);
+  border-color: rgb(240, 104, 86);
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+.stop-square {
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  background: #fff;
 }
 
-.hud-pill.processing .hud-status {
-  animation: pulse 1.4s ease-in-out infinite;
+/* ─── Processing / error indicators ────────────────────────────────────────── */
+
+.hud-spinner {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--amber);
+  border-radius: 50%;
+  animation: hud-spin 0.7s linear infinite;
+}
+
+.hud-error-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--danger);
+  color: #fff;
+  font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+@keyframes hud-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hud-pill,
+  .waveform-bar {
+    transition: none;
+  }
+
+  .hud-spinner {
+    animation-duration: 2s;
+  }
 }
