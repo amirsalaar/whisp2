@@ -26,6 +26,7 @@ pub mod correction;
 pub mod ffi;
 pub mod history;
 pub mod hotkey;
+pub mod hud;
 pub mod keychain;
 pub mod transcription;
 
@@ -95,6 +96,8 @@ pub fn spawn_tasks(
     hotkey_rx: std::sync::mpsc::Receiver<HotkeyEvent>,
     cmd_rx: mpsc::Receiver<RecordingCommand>,
 ) {
+    use tauri::Emitter;
+
     let rt = tokio::runtime::Handle::current();
 
     let mut cmd_rx = cmd_rx;
@@ -104,6 +107,19 @@ pub fn spawn_tasks(
     // the menu bar icon turns red with the failure as its tooltip, instead of
     // silently resetting to Idle.
     let (error_tx, mut error_rx) = mpsc::channel::<String>(8);
+    // Cursor-near-the-island transitions from the proximity poll. Only boundary
+    // crossings are sent, so a small buffer is plenty.
+    let (proximity_tx, mut proximity_rx) = mpsc::channel::<bool>(4);
+
+    // Runs for the process lifetime and idles while the island doesn't exist, so
+    // the Settings toggle takes effect without a restart.
+    hud::panel::spawn_proximity_poll(app_handle.clone(), proximity_tx);
+    {
+        let cfg = state.config.read().unwrap();
+        if cfg.show_hud {
+            hud::panel::create(&app_handle, cfg.hud_position);
+        }
+    }
 
     // Bridge std::sync::mpsc (CGEventTap) into tokio channel.
     let (async_hk_tx, mut async_hk_rx) = mpsc::channel::<HotkeyEvent>(64);
@@ -123,13 +139,44 @@ pub fn spawn_tasks(
     rt.spawn(async move {
         let mut current = RecordingState::Idle;
         let mut tray_anim_abort: Option<tokio::task::AbortHandle> = None;
+        // Whether the cursor is hovering near the island. Only affects how the
+        // island renders while idle — never the recording state itself.
+        let mut cursor_near = false;
+        // The last thing painted onto the island: its state *and* its caption, since
+        // the caption is part of what the user sees but not part of `HudState`.
+        let mut current_hud: Option<(hud::panel::HudState, Option<String>)> = None;
+        // Guard the select arms below: once a sender is gone, `recv()` returns
+        // `None` immediately forever, which would spin this loop hot. A closed
+        // channel must disable only its own arm — never break the loop, because
+        // this task also paints the island. Notably, when Accessibility isn't
+        // granted the event tap is never installed, so the hotkey channel is
+        // closed from the very first poll; breaking here left the island frozen on
+        // whatever it first rendered.
+        let mut watching_proximity = true;
+        let mut watching_hotkey = true;
+        let mut watching_reset = true;
+        let mut watching_error = true;
 
         loop {
+            // Every input is gone, so nothing can ever change the island again.
+            if !watching_proximity && !watching_hotkey && !watching_reset && !watching_error {
+                break;
+            }
             let new_state = tokio::select! {
-                maybe_event = async_hk_rx.recv() => {
+                maybe_near = proximity_rx.recv(), if watching_proximity => {
+                    match maybe_near {
+                        Some(near) => cursor_near = near,
+                        None => watching_proximity = false,
+                    }
+                    current.clone()
+                }
+                maybe_event = async_hk_rx.recv(), if watching_hotkey => {
                     let event = match maybe_event {
                         Some(e) => e,
-                        None => break,
+                        None => {
+                            watching_hotkey = false;
+                            continue;
+                        }
                     };
                     let mode = state_hk.config.read().unwrap().recording_mode.clone();
                     match (&current, &event) {
@@ -158,14 +205,16 @@ pub fn spawn_tasks(
                         _ => current.clone(),
                     }
                 }
-                maybe_reset = reset_rx.recv() => {
-                    if maybe_reset.is_none() { break; }
-                    RecordingState::Idle
+                maybe_reset = reset_rx.recv(), if watching_reset => {
+                    match maybe_reset {
+                        Some(()) => RecordingState::Idle,
+                        None => { watching_reset = false; continue; }
+                    }
                 }
-                maybe_error = error_rx.recv() => {
+                maybe_error = error_rx.recv(), if watching_error => {
                     match maybe_error {
                         Some(msg) => RecordingState::Error(msg),
-                        None => break,
+                        None => { watching_error = false; continue; }
                     }
                 }
             };
@@ -184,6 +233,30 @@ pub fn spawn_tasks(
                     });
                 }
             }
+
+            // Jointly derived from the FSM and the cursor, so this can't live in
+            // the `new_state != current` branch above: hovering the island while
+            // idle must expand it even though the recording state didn't change.
+            if state_hk.config.read().unwrap().show_hud {
+                let desired = hud::panel::hud_state_for(&current, cursor_near);
+                let label = match &current {
+                    RecordingState::Error(msg) => Some(msg.clone()),
+                    _ => None,
+                };
+                // Dedup on the label as well as the state: `HudState::Error` carries
+                // no message, so comparing states alone would treat a *different*
+                // failure as no change and leave the island showing the previous
+                // one (e.g. a mic error still on screen while the tray already
+                // reports a transcription error).
+                if current_hud.as_ref() != Some(&(desired.clone(), label.clone())) {
+                    current_hud = Some((desired.clone(), label.clone()));
+                    hud::panel::update_with_label(&ah_hk, desired, label.as_deref());
+                }
+            } else {
+                // Toggled off in Settings; forget the last painted state so the
+                // island repaints correctly if it's turned back on.
+                current_hud = None;
+            }
         }
     });
 
@@ -192,6 +265,7 @@ pub fn spawn_tasks(
     let reset_tx_audio = reset_tx.clone();
     let error_tx_audio = error_tx.clone();
     let state_arc = Arc::clone(&state);
+    let ah_audio = app_handle.clone();
     rt.spawn(async move {
         let mut stop_tx: Option<mpsc::Sender<()>> = None;
         let mut pcm_rx: Option<mpsc::Receiver<Vec<f32>>> = None;
@@ -203,8 +277,23 @@ pub fn spawn_tasks(
             match cmd_rx.recv().await {
                 Some(RecordingCommand::Start(bundle_id)) => {
                     source_app = bundle_id;
-                    let input_device = state_arc.config.read().unwrap().input_device.clone();
-                    match capture::start_recording(input_device.clone()) {
+                    let (input_device, hud_on) = {
+                        let cfg = state_arc.config.read().unwrap();
+                        (cfg.input_device.clone(), cfg.show_hud)
+                    };
+                    // Feed the island's waveform. Skipped entirely when the island is
+                    // off, so we don't run the meter or emit events nobody listens to.
+                    let level_sink = hud_on.then(|| {
+                        let ah = ah_audio.clone();
+                        Box::new(move |level: f32| {
+                            let _ = ah.emit_to(
+                                tauri::EventTarget::webview_window("hud"),
+                                "audio_level",
+                                level,
+                            );
+                        }) as capture::LevelSink
+                    });
+                    match capture::start_recording(input_device.clone(), level_sink) {
                         Ok(session) => {
                             // Warn loudly when the user's chosen mic was absent and we
                             // recorded from the system default instead — otherwise a
@@ -311,6 +400,12 @@ pub fn spawn_tasks(
                     stop_tx.take();
                     pcm_rx.take();
                     source_app.take();
+                    active_device.take();
+                    // Must mirror the Stop arm: recording boosts the system input
+                    // volume 1.5x, so discarding without restoring leaves the user's
+                    // mic gain permanently raised until their next completed
+                    // recording. Reachable from the island's ✕ button.
+                    if let Some(vol) = saved_vol.take() { audio::volume::restore(vol); }
                     let _ = reset_tx_audio.send(()).await;
                 }
             }
@@ -563,7 +658,8 @@ async fn spawn_mobile_audio_task(
         match cmd_rx.recv().await {
             Some(RecordingCommand::Start(_)) => {
                 let input_device = state.config.read().unwrap().input_device.clone();
-                match capture::start_recording(input_device) {
+                // No floating island on iOS, so no live level to meter.
+                match capture::start_recording(input_device, None) {
                     Ok(session) => {
                         if session.fell_back {
                             tracing::warn!("mobile: requested mic unavailable, using '{}'", session.device_name);
@@ -823,6 +919,10 @@ pub fn run() {
                 commands::diagnostics::clear_ios_log,
                 commands::diagnostics::read_recent_logs,
                 commands::diagnostics::open_log_dir,
+                commands::hud::hud_stop_recording,
+                commands::hud::hud_cancel_recording,
+                commands::hud::hud_save_position,
+                commands::hud::hud_current_state,
             ]);
 
         #[cfg(target_os = "macos")]

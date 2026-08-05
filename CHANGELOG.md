@@ -7,6 +7,72 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-08-05
+
+### Added
+- **A floating island that shows what Whisp is doing, wherever you're typing.**
+  A small pill sits above the Dock (draggable anywhere — it remembers where you
+  put it, and comes back on screen even if you moved it to a display you later
+  unplugged). At rest it's a dim nub that clicks straight through to the app
+  behind it, so it never gets in your way. Move the cursor near it and it expands
+  to remind you of your hotkey. While you dictate it becomes a live waveform that
+  tracks your voice — loud is tall, silence is flat — with Stop and Discard
+  buttons so you can finish or throw away a recording without touching the
+  keyboard. It then shows "Transcribing…" while the text is being produced, and
+  surfaces failures (a dead or missing mic) as a readable red pill instead of
+  only a tray tooltip. Turn it off any time in Settings; the toggle takes effect
+  immediately, without a restart.
+
+### Fixed
+- **The app no longer freezes while reading a stored API key.** Reading, saving,
+  or deleting a key ran on the UI thread, so whenever macOS interrupted with an
+  "allow access to Keychain" prompt the whole interface locked up — the floating
+  island froze mid-state and stopped responding to the cursor entirely. Keychain
+  access now happens off the UI thread, so a slow or prompting Keychain can't
+  wedge the app.
+- **The floating island responds to the cursor again.** It could open completely
+  inert — hovering it did nothing — because its window was missing the permissions
+  it needed to talk to the app at all, and the failure was silent.
+- **The island no longer opens showing the wrong state.** If it finished loading a
+  fraction of a second after Whisp had already decided what to show, that first
+  update was lost and never re-sent: the island looked collapsed while the app
+  considered it expanded, leaving an invisible click target. It now asks for the
+  current state as soon as it's ready.
+- **Dragging the island somewhere else now sticks.** Changing any unrelated
+  setting used to snap it back to the bottom-center of the screen. Pausing
+  partway through a drag no longer records the pause spot as where you dropped
+  it, and simply *clicking* the island no longer pins it in place — previously a
+  single click on a never-moved island saved its position permanently, so it
+  stopped re-centering when you changed resolution, moved the Dock, or unplugged
+  a display.
+- **Discarding a recording no longer leaves your microphone turned up.**
+  Recording temporarily boosts the input volume; pressing the island's ✕ to throw
+  a recording away skipped the step that puts it back, so the system input level
+  stayed raised until the next recording you let finish.
+- **The island expands on hover with more than one display connected.** The hover
+  zone was measured against whichever screen held the focused window instead of
+  the primary display, so on a mixed-resolution setup it sat hundreds of points
+  away from the island itself — hovering did nothing, or the island expanded with
+  the cursor nowhere near it, depending on which app you'd last clicked.
+- **Long error messages stay inside the island.** A wordy failure (a dead mic
+  naming a long device) overflowed the red pill and painted onto the desktop
+  behind it; it's now truncated with an ellipsis.
+- **The island keeps working when Accessibility permission isn't granted.** It
+  previously froze; hovering, dragging, and status display now work regardless
+  (the hotkey itself still needs the permission).
+- **Back-to-back failures show the newer message.** When one error followed
+  another, the island kept displaying the first one while the menu bar already
+  reported the second.
+- **The island respects Reduce Motion and idles quietly.** Its waveform shimmer
+  ignored the system Reduce Motion setting (the bars are drawn in JavaScript, so
+  turning off CSS animation made them *steppier*, not calmer) and the animation
+  loop kept running even with nothing on screen to animate. The shimmer now stops
+  entirely under Reduce Motion, the loop sleeps whenever no waveform is showing,
+  and the bars animate at a consistent speed on 120 Hz ProMotion displays instead
+  of running at double rate.
+
+## [1.4.0] - 2026-07-06
+
 ### Added
 - **Local Parakeet transcription (on-device, no API key).** A new provider runs
   NVIDIA's Parakeet-TDT-0.6B-v3 model fully on your Mac via ONNX Runtime — no
@@ -78,5 +144,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
   reach the transcription model, eliminating the hallucinated "Thank you."
   output Whisper produces on silence.
 
+[1.5.0]: https://github.com/amirsalaar/whisp2/releases/tag/v1.5.0
+[1.4.0]: https://github.com/amirsalaar/whisp2/releases/tag/v1.4.0
+[1.2.1]: https://github.com/amirsalaar/whisp2/releases/tag/v1.2.1
 [1.2.0]: https://github.com/amirsalaar/whisp2/releases/tag/v1.2.0
 [1.1.5]: https://github.com/amirsalaar/whisp2/releases/tag/v1.1.5

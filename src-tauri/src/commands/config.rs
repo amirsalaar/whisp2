@@ -13,14 +13,49 @@ pub fn get_config(state: State<'_, AppState>) -> Result<AppConfig, String> {
     Ok(config)
 }
 
+/// Carries over the config fields the settings form doesn't own.
+///
+/// `hud_position` is written by the island's own drag handler, and the settings
+/// UI has no control for it — so it isn't in the object the frontend sends, and
+/// `serde` fills it with the `None` default. Taking the incoming value verbatim
+/// would therefore snap the island back to bottom-center every time the user
+/// changed an unrelated setting.
+fn preserve_backend_owned_fields(incoming: AppConfig, current: &AppConfig) -> AppConfig {
+    AppConfig {
+        hud_position: current.hud_position,
+        ..incoming
+    }
+}
+
 #[tauri::command]
-pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), String> {
+pub fn set_config(
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))] app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    config: AppConfig,
+) -> Result<(), String> {
+    let config = preserve_backend_owned_fields(config, &state.config.read().unwrap());
+
     // Update live hotkey mask so CGEventTap picks up changes immediately (macOS only).
     #[cfg(target_os = "macos")]
     {
         use std::sync::atomic::Ordering;
         let new_mask = device_mask_for_trigger(&config.hotkey);
         state.hotkey_mask.store(new_mask, Ordering::Relaxed);
+    }
+
+    // Show/hide the floating island immediately, so the toggle doesn't silently
+    // require a restart. `create_async`/`destroy` are no-ops when already in the
+    // requested state.
+    #[cfg(target_os = "macos")]
+    {
+        let was_shown = state.config.read().unwrap().show_hud;
+        if config.show_hud != was_shown {
+            if config.show_hud {
+                crate::hud::panel::create_async(&app, config.hud_position);
+            } else {
+                crate::hud::panel::destroy(&app);
+            }
+        }
     }
 
     // If the model path changed, invalidate the cached WhisperContext so it reloads.
@@ -51,8 +86,19 @@ pub fn set_config(state: State<'_, AppState>, config: AppConfig) -> Result<(), S
     persistence::save(&config).map_err(|e| e.to_string())
 }
 
+/// Reads an API key from the Keychain.
+///
+/// `async` on purpose. Tauri runs a **synchronous** command on the main thread,
+/// and a Keychain call can block there for a long time — indefinitely, if macOS
+/// decides to put up an "allow access" prompt (which it does whenever the binary's
+/// signature no longer matches the one that stored the item). While the main
+/// thread is parked, `NSApp`'s runloop stops turning: the floating island freezes
+/// mid-state, `run_on_main_thread` closures queue up without ever running, and
+/// global NSEvent monitors deliver nothing. An `async` command runs on Tauri's
+/// async runtime instead, so a slow or prompting Keychain can't wedge the UI.
+/// Same reasoning for [`set_api_key`] and [`delete_api_key`].
 #[tauri::command]
-pub fn get_api_key(key_name: String) -> Result<Option<String>, String> {
+pub async fn get_api_key(key_name: String) -> Result<Option<String>, String> {
     crate::keychain::get(&key_name).map_err(|e| e.to_string())
 }
 
@@ -78,14 +124,18 @@ fn validate_api_key(value: &str) -> Result<&str, String> {
     Ok(trimmed)
 }
 
+/// Stores an API key. `async` to keep the Keychain off the main thread; see
+/// [`get_api_key`].
 #[tauri::command]
-pub fn set_api_key(key_name: String, value: String) -> Result<(), String> {
+pub async fn set_api_key(key_name: String, value: String) -> Result<(), String> {
     let key = validate_api_key(&value)?;
     crate::keychain::set(&key_name, key).map_err(|e| e.to_string())
 }
 
+/// Removes a stored API key. `async` to keep the Keychain off the main thread; see
+/// [`get_api_key`].
 #[tauri::command]
-pub fn delete_api_key(key_name: String) -> Result<(), String> {
+pub async fn delete_api_key(key_name: String) -> Result<(), String> {
     crate::keychain::delete(&key_name).map_err(|e| e.to_string())
 }
 
@@ -180,6 +230,27 @@ mod tests {
     #[test]
     fn test_get_platform_is_macos_on_macos() {
         assert_eq!(get_platform(), "macos");
+    }
+
+    #[test]
+    fn saving_settings_keeps_the_island_where_the_user_dragged_it() {
+        // The settings form has no island-position control, so the payload it
+        // sends always carries the serde default. Honoring that would reset the
+        // island to bottom-center on any unrelated settings change.
+        let current = AppConfig { hud_position: Some((200.0, 640.0)), ..Default::default() };
+        let incoming = AppConfig { show_hud: false, ..Default::default() };
+
+        let merged = preserve_backend_owned_fields(incoming, &current);
+
+        assert_eq!(merged.hud_position, Some((200.0, 640.0)));
+        // Everything the form *does* own still comes from the payload.
+        assert!(!merged.show_hud);
+    }
+
+    #[test]
+    fn a_never_dragged_island_stays_unpositioned() {
+        let merged = preserve_backend_owned_fields(AppConfig::default(), &AppConfig::default());
+        assert_eq!(merged.hud_position, None);
     }
 
     #[test]

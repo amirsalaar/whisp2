@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "hud",
+  "description": "Floating island capabilities. Separate from `main` because the island is a distinct window label, and a capability only applies to the windows it names — without this, every core command the island calls (event listen, outerPosition, startDragging) is denied and `init()` in hud.ts hangs on its first await.",
+  "windows": ["hud"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-ignore-cursor-events"
+  ]
+}
