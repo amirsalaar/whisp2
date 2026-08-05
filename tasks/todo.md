@@ -1,5 +1,40 @@
 # whisp-rs todos
 
+## Done: floating island (anarlog-inspired) (2026-08-04)
+
+Revived and upgraded the existing pill HUD instead of rebuilding it: fixed the
+CSS/TS mismatch, fed it real audio levels, made it draggable with a remembered
+position, and added the recording controls + processing/status states.
+
+- [x] `hud/position.rs` — pure placement + offscreen clamping, unit-tested.
+- [x] Audio level tap → `audio_level` event; waveform tracks the live mic.
+- [x] Wired into the FSM in `lib.rs` (proximity + recording state → `HudState`).
+- [x] Frontend: state renderers, drag-to-move, error pill.
+- [x] `hud_position` in config + persistence, preserved across settings saves.
+- [x] `capabilities/hud.json` — without it the island's webview is inert.
+- [x] Two real defects found and fixed during QA (see `lessons.md`):
+      a synchronous Keychain command blocking the main thread and freezing the
+      whole UI, and the island's first state being dropped when it painted before
+      the webview was listening.
+- [x] Quality gates: 101 Rust tests, clippy `-D warnings`, ui-build all green.
+- [x] Disposable QA harness deleted; its drag/relaunch check promoted into
+      `hud::position`'s tests.
+- [x] Isolated code review (two reviewers with no access to my reasoning) +
+      `/receiving-code-review`. Both independently found the boot-race lost update
+      I'd already fixed. Nine further defects verified against the source and fixed:
+      the error caption overflowing onto the desktop, `overflow: hidden` dropped
+      from `.hud-pill` by this diff, a mid-drag pause being saved as the drop, a
+      plain click permanently pinning a never-dragged island, Reduce Motion being
+      ignored by the JS-driven shimmer, an always-on rAF loop at a hardcoded 60Hz,
+      back-to-back errors showing the stale message, Discard leaving the mic gain
+      boosted, and the multi-monitor coordinate flip. Pushed back on five backend
+      findings the reviewer had already walked back itself, plus one pre-existing
+      stale-form issue outside this scope.
+- [ ] Hand-check the items in `tasks/test-commands/validate-floating-island.sh`
+      that need Accessibility (stop/cancel buttons, error pill, show_hud toggle,
+      full-screen). `run-dev.sh` re-signs ad-hoc, which revokes the grant — so
+      re-grant in System Settings and relaunch before testing.
+
 ## Active: shareable logs + 30-day retention (2026-06-22)
 
 Goal: users can access/copy logs to share in a bug report; errors are captured;

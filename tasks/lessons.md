@@ -1,0 +1,133 @@
+# Lessons
+
+Hard-won, non-obvious things about this codebase. Each entry is a trap that cost
+real debugging time — the symptom first, so a future search finds it.
+
+## A synchronous Tauri command runs on the MAIN THREAD. Never block in one.
+
+**Symptom:** the floating island freezes mid-state, global NSEvent monitors stop
+delivering, and `run_on_main_thread` closures queue up without ever running.
+Looks exactly like "the monitor is flaky" or "AppKit is broken".
+
+**Cause:** `#[tauri::command] pub fn ...` (no `async`) is invoked on the main
+thread. A Keychain read blocks there indefinitely when macOS puts up an "allow
+access" prompt — which it does whenever the binary's signature no longer matches
+the one that stored the item, i.e. after every ad-hoc re-sign. While the main
+thread is parked, `NSApp`'s runloop stops turning and everything main-thread
+dies with it.
+
+**Fix:** make the command `async` so it runs on Tauri's async runtime. See the
+doc comment on `commands::config::get_api_key`. Startup keychain reads in `setup`
+are fine sync — no webview exists yet to freeze.
+
+**Diagnostic:** `sample <pid>` and read the main thread's stack. It named the
+culprit in one shot after a long stretch of guessing at AppKit.
+
+## Tauri 2 capabilities are per-window-label, and a missing one hangs silently.
+
+A window whose label is in no capability's `windows` array gets no core
+permissions. The failure mode is the worst kind: `await listen(...)` never
+resolves *and* never rejects, so the whole `init()` just stops with no error.
+The island's webview is inert without `src-tauri/capabilities/hud.json`.
+
+## Tauri events are not buffered — emit-on-change needs a pull-based catch-up.
+
+An `emit_to` that happens before the target webview has registered its `listen()`
+is dropped, not queued. Combined with an FSM that emits only on *change*, a
+dropped event is never re-sent: the island sat visibly collapsed while Rust
+believed it was expanded and clickable. Hence `LAST_PAYLOAD` + the
+`hud_current_state` command, which the webview adopts once its listeners are up.
+Any new emit-on-change event needs the same treatment.
+
+## Frontend assets are compiled into the Rust binary.
+
+`frontendDist` is embedded, so a change to `src-ui` needs a full
+`cargo tauri build` (i.e. `./tasks/run-dev.sh`). `npm run build` alone changes
+nothing about the running app — which reads as "my fix had no effect".
+
+## VERIFY YOUR TEST INSTRUMENT BEFORE TRUSTING A NEGATIVE RESULT.
+
+The single biggest time sink in the island work. Every "the code is broken"
+conclusion below was actually a broken probe:
+
+- `mv.swift` ignored its arguments and always swept to a hardcoded point, so
+  every run "coincidentally" left the cursor near the island.
+- `goto` used `CGWarpMouseCursorPosition`, which moves the pointer *without
+  posting an event* — so `NSEvent.mouseLocation` kept reporting the old spot and
+  five separate runs showed zero proximity transitions.
+- `warp` reported success while leaving the cursor a third of the way there.
+- `allwin.swift` filtered on a hardcoded, long-dead pid and printed nothing.
+- A hand-rolled `flagsChanged` event (bare `CGEvent(source:)` with the type
+  reassigned) is silently dropped; the keyboard-event form in `rec.swift`
+  (`CGEvent(keyboardEventSource:virtualKey:keyDown:)`) works.
+
+Rule: make the probe report its own read-back and assert the effect happened
+(see `place.swift`: warp, post a real `mouseMoved`, then verify). A probe that
+can't fail loudly will lie quietly.
+
+Corollary — `screencapture` is a bad island probe. Two rounds of captures showed
+"the pill isn't expanding" while the pill *was* expanding: the captures raced the
+cursor drifting back out of the hot zone, and a transparent always-on-top window
+doesn't reliably appear in a region capture anyway. Instrumenting the proximity
+poll with one `tracing::warn!` of its own inputs and result settled in one run what
+the screenshots got backwards — and note the log must be read line-by-line, since
+`uniq -c` over separate fields silently pairs a cursor value from one tick with a
+verdict from another.
+
+## Synthetic CGEvents cannot drive `startDragging` (window drags).
+
+**Symptom:** a scripted drag of the island posts a clean `leftMouseDown` → dense
+`leftMouseDragged` stream → `leftMouseUp`, reports every coordinate correctly, and
+the window does not move one pixel. `hud_position` is unchanged afterwards.
+
+**Cause:** `startDragging` calls AppKit's `performWindowDragWithEvent:`, which runs
+its own nested event-tracking loop driven by the real HID stream. Posted events
+don't feed it. Tried both with and without `CGWarpMouseCursorPosition` during the
+gesture, and with 30–40 dragged events at 25–35ms spacing.
+
+**Consequence for QA:** "the position didn't change" after a synthetic drag proves
+**nothing** — the gesture never started. Discriminate by reading the window's rect
+(`CGWindowListCopyWindowInfo`, filtered by the app's *live* pid): if the rect is
+unchanged, the drag never engaged. Drag-drop behaviour needs a human hand; note it
+as such in the checklist rather than recording a false pass.
+
+**What synthetic events CAN do here:** hover/proximity (plain `mouseMoved` works,
+verified by instrumenting the poll and sweeping across the pill), plain clicks, and
+DOM event delivery into the WebView.
+
+## Two coordinate flips that look identical and aren't: tao vs `NSScreen.mainScreen`.
+
+Tauri's `position`/`outer_position` are top-left-origin; AppKit's are bottom-left.
+tao flips against **`CGDisplay::main().pixels_high()`** — the *primary* display
+(`bottom_left_to_top_left`). Flipping with `NSScreen::mainScreen().frame().height`
+instead is wrong, because `mainScreen` is the screen holding the **key window** and
+changes as the user focuses windows on other displays.
+
+On a single-display Mac the two are the same number, so this is invisible locally
+and only breaks for users with a mixed-resolution second monitor: the island's
+hover zone lands off by the height difference, so hovering never expands it. Pinned
+by `hud::position::appkit_bottom_from_tauri_top` plus a test that asserts the wrong
+flip height actually misses the pill.
+
+## Prefer a log channel over pixel archaeology.
+
+Screenshotting and colour-diffing the island to infer its state was slow and
+ambiguous. A temporary `hud_qadiag` command that let `hud.ts` write into the Rust
+log — including a capture-phase `document` listener for `mousedown`/`pointerdown`
+— answered in one run what a dozen screenshots couldn't: whether synthetic
+CGEvents reach the WebView's DOM at all (they do).
+
+## Two independent probes beat one clever probe.
+
+Separating "is the tokio timer alive?" (probe A, no main-thread hop) from "does
+the main thread still pump?" (probe B, fire-and-forget hop that never awaits)
+localised the freeze immediately: A healthy, B queued with `ok=true` but 0
+closures executed. Either probe alone would have been ambiguous.
+
+## Accessibility is revoked by every ad-hoc re-sign.
+
+`run-dev.sh` runs `codesign --force --deep --sign -`, so macOS treats the result
+as a new binary and drops the Accessibility grant — the log says
+`Accessibility not granted — hotkey recording disabled` and the hotkey silently
+does nothing. Re-grant in System Settings after building. Worth knowing that the
+island itself (hover, drag, paint) works fine without it.
