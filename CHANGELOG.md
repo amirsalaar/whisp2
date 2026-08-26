@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-08-26
+
 ### Added
 - **Gemini 3.5 Transcribe support.** Google's new dedicated speech-to-text model
   is now the default when you pick Gemini, replacing the general-purpose chat
