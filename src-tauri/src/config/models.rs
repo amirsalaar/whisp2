@@ -1,5 +1,20 @@
 use serde::{Deserialize, Serialize};
 
+/// Google's dedicated speech-to-text model. Preferred over the general-purpose
+/// multimodal models for dictation: it is purpose-built for transcription rather
+/// than prompted into it.
+pub const DEFAULT_GEMINI_MODEL: &str = "gemini-3.5-transcribe";
+
+/// Gemini models Google has shut down. A config written by an older Whisp can
+/// still name one, and requests against them fail outright, so `config::load`
+/// swaps them for [`DEFAULT_GEMINI_MODEL`].
+pub const RETIRED_GEMINI_MODELS: &[&str] = &[
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+];
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptionProvider {
@@ -73,7 +88,7 @@ impl Default for AppConfig {
             openai_model: "whisper-1".into(),
             groq_api_url: "https://api.groq.com/openai/v1/audio/transcriptions".into(),
             groq_model: "whisper-large-v3-turbo".into(),
-            gemini_model: "gemini-2.0-flash".into(),
+            gemini_model: DEFAULT_GEMINI_MODEL.into(),
             play_completion_sound: true,
             save_history: true,
             show_hud: true,
@@ -93,7 +108,10 @@ mod tests {
 
     #[test]
     fn default_provider_is_openai() {
-        assert_eq!(TranscriptionProvider::default(), TranscriptionProvider::OpenAI);
+        assert_eq!(
+            TranscriptionProvider::default(),
+            TranscriptionProvider::OpenAI
+        );
     }
 
     #[test]

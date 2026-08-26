@@ -1,21 +1,19 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use super::models::AppConfig;
+use super::models::{AppConfig, DEFAULT_GEMINI_MODEL, RETIRED_GEMINI_MODELS};
 
 pub fn app_support_dir() -> Result<PathBuf> {
     #[cfg(target_os = "ios")]
     {
-        let home = std::env::var("HOME")
-            .map_err(|_| anyhow::anyhow!("HOME env var not set"))?;
+        let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME env var not set"))?;
         let dir = PathBuf::from(home).join("Documents");
         std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }
     #[cfg(target_os = "macos")]
     {
-        let home = std::env::var("HOME")
-            .map_err(|_| anyhow::anyhow!("HOME env var not set"))?;
+        let home = std::env::var("HOME").map_err(|_| anyhow::anyhow!("HOME env var not set"))?;
         // Use the existing path that matches the macOS keychain service name.
         let dir = PathBuf::from(home)
             .join("Library")
@@ -43,13 +41,31 @@ pub fn load() -> Result<AppConfig> {
     let path = config_path()?;
     if !path.exists() {
         #[cfg(target_os = "macos")]
-        if let Ok(old) = migrate_from_old_path(&path) {
+        if let Ok(mut old) = migrate_from_old_path(&path) {
+            retire_shutdown_gemini_model(&mut old);
             return Ok(old);
         }
         return Ok(AppConfig::default());
     }
     let bytes = std::fs::read(&path)?;
-    Ok(serde_json::from_slice(&bytes)?)
+    let mut config: AppConfig = serde_json::from_slice(&bytes)?;
+    retire_shutdown_gemini_model(&mut config);
+    Ok(config)
+}
+
+/// Point configs that still name a shut-down Gemini model at the current default.
+/// Applied in memory on every load rather than rewritten to disk, so a user who
+/// never opens Settings still gets working transcription instead of a hard API
+/// error, and nothing touches their file behind their back.
+fn retire_shutdown_gemini_model(config: &mut AppConfig) {
+    if RETIRED_GEMINI_MODELS.contains(&config.gemini_model.as_str()) {
+        tracing::info!(
+            "Gemini model {} has been shut down by Google; using {} instead",
+            config.gemini_model,
+            DEFAULT_GEMINI_MODEL
+        );
+        config.gemini_model = DEFAULT_GEMINI_MODEL.into();
+    }
 }
 
 pub fn save(config: &AppConfig) -> Result<()> {
@@ -198,6 +214,32 @@ mod tests {
             std::fs::read(new_dir.join("models/ggml-tiny.bin")).unwrap(),
             b"model-bytes"
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn load_replaces_a_shutdown_gemini_model() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        let mut cfg = AppConfig::default();
+        cfg.gemini_model = "gemini-2.0-flash".into();
+        save(&cfg).expect("save");
+
+        assert_eq!(load().expect("load").gemini_model, DEFAULT_GEMINI_MODEL);
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn load_leaves_a_live_gemini_model_alone() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _g = HomeGuard::new(tmp.path());
+
+        let mut cfg = AppConfig::default();
+        cfg.gemini_model = "gemini-3.7-flash".into();
+        save(&cfg).expect("save");
+
+        assert_eq!(load().expect("load").gemini_model, "gemini-3.7-flash");
     }
 
     #[test]

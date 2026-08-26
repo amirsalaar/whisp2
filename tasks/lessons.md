@@ -169,3 +169,43 @@ position I read was sampled *after* that window had closed. The timestamps said 
 they stopped and never resumed. Before diagnosing an anomaly, check the last
 event's time against *now*; a fresh run with nothing touching the mouse logged zero
 transitions in 28s and settled it.
+
+## An SDK convenience field is not a wire field.
+
+Gemini's transcription docs say "the complete transcript text is returned in
+`interaction.output_text`", and the obvious parser reads `resp["output_text"]`.
+The Interaction resource reference then says that field is "added by the SDK" —
+it does not exist in the REST payload, and none of the sample responses populate
+it. A provider built from the guide alone would have compiled, passed review, and
+returned "response missing text field" on every single dictation.
+
+The transcript actually has to be gathered the way the SDKs gather it: walk
+`steps[]`, keep the step whose `type` is `model_output`, and concatenate the
+`{"type":"text","text":...}` parts of its `content[]`. Note the response also
+echoes the caller's turn back as a `user_input` step, so an unfiltered walk
+prepends the prompt to the transcript.
+
+Two habits fall out of this:
+
+- **Read the resource reference, not just the guide.** Guides are written against
+  the SDKs; the wire format lives in the API reference. When they disagree about a
+  field, the reference wins.
+- **Test the parser against a payload shaped like the reference's example**,
+  including the parts you must ignore (`user_input` steps, `word_info`
+  annotations, non-text content). Those tests are what encode the distinction.
+
+## A dedicated model can mean a different endpoint, not just a different string.
+
+`gemini-3.5-transcribe` is not a drop-in for `gemini-2.0-flash` in the existing
+`:generateContent` call. It is served from `POST /v1beta/interactions`, takes
+`model` + `input[]` instead of `contents[].parts[]`, spells inline audio `data`
+rather than `inline_data.data`, and configures language/diarization through
+`generation_config.transcription_config` instead of English prose in the prompt.
+Swapping only the model ID in Settings would have produced a 404. Before adding a
+"new model" to a provider, check whether it shares the provider's endpoint.
+
+Related: every Gemini model Whisp had ever offered (2.0-flash, 1.5-flash,
+1.5-pro) was shut down while nobody was looking, so that provider was
+100% broken with no bug report. Model IDs are perishable config, and a provider
+whose only options are dead models fails silently until someone selects it — a
+`RETIRED_GEMINI_MODELS` sweep at config load is what carries existing users over.

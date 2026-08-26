@@ -489,7 +489,7 @@ function EngineStep({
     {
       value: "gemini",
       label: "Google Gemini",
-      desc: "Cloud · Multimodal model",
+      desc: "Cloud · Dedicated speech-to-text",
       tag: "Free tier",
       tagClass: "ob-tag-free",
     },

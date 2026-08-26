@@ -142,3 +142,34 @@ logs auto-pruned to 30 days so the dir never outgrows its size.
 - [x] GitHub repo — live at github.com/amirsalaar/whisp2
 - [ ] Universal binary build (`--target universal-apple-darwin`) — release.yml ships aarch64-only DMG today; signing/notarization/DMG already wired, universal arch still pending
 - [x] GitHub Actions CI — `.github/workflows/ci.yml` (check/test/clippy + frontend lint on push/PR to main) and `release.yml` (tag / workflow_dispatch / `[release]` trailer → build + sign + publish, version synced back to main)
+
+## Done: Gemini 3.5 Transcribe provider (2026-08-26)
+
+Google's dedicated speech-to-text model, added as the default for the Gemini
+provider. Not a model-string swap: it lives on a different API surface.
+
+- [x] Verified the wire format against Google's docs *and* the Interaction
+      resource reference. `gemini-3.5-transcribe` is served from
+      `POST /v1beta/interactions` with `model` + `input[]`, inline audio as
+      `data`, and options under `generation_config.transcription_config` — not
+      `:generateContent`.
+- [x] `providers/gemini.rs` routes by model: `*-transcribe` → Interactions API,
+      flash/pro → the existing `generateContent` path (untouched).
+- [x] Response parsing walks `steps[] → model_output → content[]`. Deliberately
+      does **not** read `output_text`: that field is SDK-synthesized and absent
+      from the REST payload (see `lessons.md`).
+- [x] Language: omit `language_codes` for the model's own 85+ locale
+      auto-detection; pass the Settings string through as BCP-47 when pinned.
+- [x] `-live` variants rejected with a message pointing at the non-live model
+      (they need the WebSocket Live API).
+- [x] 20 MB inline-request ceiling checked up front (~8 min of 16 kHz mono),
+      with a message naming the actual size instead of an opaque API error.
+- [x] Found and fixed a latent break: *all three* Gemini models Whisp offered
+      (2.0-flash, 1.5-flash, 1.5-pro) have been shut down by Google, so the
+      provider failed on every attempt. Picker refreshed to current models;
+      `RETIRED_GEMINI_MODELS` swaps a stale config onto the default at load time
+      (in memory — no surprise writes to the user's file).
+- [x] Quality gates: 123 Rust tests (12 new, all on pure builders/parsers),
+      clippy `-D warnings`, ui-build, ui-lint (one pre-existing warning), fmt.
+- [ ] **Not verified against the live API** — no Gemini key was used, so the
+      request shape is doc-derived. One real dictation with a key confirms it.

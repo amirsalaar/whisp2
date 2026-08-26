@@ -7,7 +7,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+- **Gemini 3.5 Transcribe support.** Google's new dedicated speech-to-text model
+  is now the default when you pick Gemini, replacing the general-purpose chat
+  models that had to be talked into transcribing. It detects the spoken language
+  on its own across 85+ locales — including switching languages mid-sentence —
+  which makes it a much broader cloud alternative to Parakeet's European-only
+  list. Set a language in Settings to pin it instead of auto-detecting.
+  `gemini-3.7-flash` and `gemini-3.5-flash-lite` remain selectable.
+
 ### Fixed
+- **Gemini transcription works again.** Every model Whisp offered for Gemini
+  (`gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-pro`) has since been shut
+  down by Google, so choosing Gemini failed on every attempt. The picker now
+  lists current models, and if your settings still name a retired one Whisp
+  quietly moves you to Gemini 3.5 Transcribe instead of erroring.
+- **Recordings too large for Gemini fail with an explanation.** Clips over
+  roughly eight minutes exceed the API's 20 MB request limit; you now get a
+  message saying so instead of an opaque API error.
 - **The floating island no longer expands when the cursor is nowhere near it.**
   Hovering was triggered by a large invisible zone around the island — roughly
   365 times the area of the small nub you actually see — so the pill would pop

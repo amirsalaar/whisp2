@@ -960,6 +960,12 @@ export default function App() {
                     <div className="settings-row">
                       <div className="row-label">
                         <span className="row-title">Model</span>
+                        <span className="row-desc">
+                          gemini-3.5-transcribe is Google's dedicated
+                          speech-to-text model — best accuracy for dictation. The
+                          flash models are general-purpose and transcribe by
+                          prompt.
+                        </span>
                       </div>
                       <div className="row-control">
                         <select
@@ -972,13 +978,15 @@ export default function App() {
                             })
                           }
                         >
-                          <option value="gemini-2.0-flash">
-                            gemini-2.0-flash
+                          <option value="gemini-3.5-transcribe">
+                            gemini-3.5-transcribe
                           </option>
-                          <option value="gemini-1.5-flash">
-                            gemini-1.5-flash
+                          <option value="gemini-3.7-flash">
+                            gemini-3.7-flash
                           </option>
-                          <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                          <option value="gemini-3.5-flash-lite">
+                            gemini-3.5-flash-lite
+                          </option>
                         </select>
                       </div>
                     </div>
